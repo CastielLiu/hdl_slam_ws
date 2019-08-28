@@ -1,0 +1,10 @@
+<!-- -->
+<launch>
+
+	<node name="convert_point_cloud_node" pkg="convert_point_cloud" type="convert_point_cloud_node">
+		<param name="in_topic_name" value="/kitti/velo/pointcloud"/>
+		<param name="out_topic_name" value="/velodyne_points"/>
+		<param name="frame_id" value="velodyne"/>
+	</node>
+
+</launch>
