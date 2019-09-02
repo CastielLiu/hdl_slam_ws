@@ -6,7 +6,7 @@
   <arg name="enable_gps" default="false" />
   <arg name="enable_imu_acc" default="false" />
   <arg name="enable_imu_ori" default="false" />
-  <arg name="points_topic" default="/velodyne_points" />
+  <arg name="points_topic" default="/floor_detection/floor_filtered_points" />
 
 
   <!-- scan_matching_odometry_nodelet -->
