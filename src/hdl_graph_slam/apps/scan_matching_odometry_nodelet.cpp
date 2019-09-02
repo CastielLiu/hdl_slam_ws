@@ -152,8 +152,8 @@ private:
     auto filtered = downsample(cloud);
     registration->setInputSource(filtered);
 
-    pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
-    registration->align(*aligned, prev_trans); //output the registrated pointcloud
+    pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>()); 
+    registration->align(*aligned, prev_trans); //output the registrated pointcloud, must
 
     if(!registration->hasConverged()) {
       NODELET_INFO_STREAM("scan matching has not converged!!");

@@ -139,7 +139,7 @@ private:
     // RANSAC
     pcl::SampleConsensusModelPlane<PointT>::Ptr model_p(new pcl::SampleConsensusModelPlane<PointT>(filtered));
     pcl::RandomSampleConsensus<PointT> ransac(model_p);
-    ransac.setDistanceThreshold(0.1);
+    ransac.setDistanceThreshold(0.1);     //???????????
     ransac.computeModel();
 
     pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
@@ -218,7 +218,7 @@ private:
     ne.setSearchMethod(tree);
 
     pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
-    ne.setKSearch(10);
+    ne.setKSearch(10);   //??????????
     
     //预设法线的方向  因为法线方向有两种可能
     ne.setViewPoint(0.0f, 0.0f, sensor_height);
@@ -228,6 +228,9 @@ private:
     filtered->reserve(cloud->size());
 
     for (int i = 0; i < cloud->size(); i++) {
+    	//.getNormalVector3fMap() 获取法线向量
+    	//.normalized() 归一化向量
+    	//.dot(Eigen::Vector3f::UnitZ() 取Z的值
       float dot = normals->at(i).getNormalVector3fMap().normalized().dot(Eigen::Vector3f::UnitZ());
       if (std::abs(dot) > std::cos(normal_filter_thresh * M_PI / 180.0)) {
         filtered->push_back(cloud->at(i));
