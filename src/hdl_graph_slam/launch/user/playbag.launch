@@ -3,7 +3,7 @@
 
 	<param name="use_sim_time" value="false"/>
 	
-	<arg name="bagFile" value="/home/wuconglei/wendao/PointCloud_bag/xingzhenglou.bag"/>
+	<arg name="bagFile" value="/home/zwei/wendao/data/20190828/xingzhenglou.bag"/>
 	
 	<node pkg="rosbag" type="play" name="rosbag" args="-r 0.1 $(arg bagFile)" output="screen">
 		<remap from="/pandar_points" to="/raw_points"/>
