@@ -68,6 +68,8 @@ public:
 
   virtual void onInit() {
     nh = getNodeHandle();
+    // Get the node handle with the Multi Threaded callback queue. (provides this nodelets custom remappings and name)
+    // 多线程句柄
     mt_nh = getMTNodeHandle();
     private_nh = getPrivateNodeHandle();
 
@@ -129,6 +131,9 @@ public:
 
     double graph_update_interval = private_nh.param<double>("graph_update_interval", 3.0);
     double map_cloud_update_interval = private_nh.param<double>("map_cloud_update_interval", 10.0);
+    
+    //ros::Timer使用ROS Clock
+    //如果想要定时器使用wall-clock时间，可以替代createTimer为createWallTimer
     optimization_timer = mt_nh.createWallTimer(ros::WallDuration(graph_update_interval), &HdlGraphSlamNodelet::optimization_timer_callback, this);
     map_publish_timer = mt_nh.createWallTimer(ros::WallDuration(map_cloud_update_interval), &HdlGraphSlamNodelet::map_points_publish_timer_callback, this);
   }
@@ -141,6 +146,7 @@ private:
    */
   void cloud_callback(const nav_msgs::OdometryConstPtr& odom_msg, const sensor_msgs::PointCloud2::ConstPtr& cloud_msg) {
     const ros::Time& stamp = odom_msg->header.stamp;
+    //ros里程计msg转为欧拉变换矩阵4x4
     Eigen::Isometry3d odom = odom2isometry(odom_msg);
 
     pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
@@ -148,7 +154,7 @@ private:
     if(base_frame_id.empty()) {
       base_frame_id = cloud_msg->header.frame_id;
     }
-
+	//前后帧变换足够大时，更新累计路程，并记录当前帧位姿,当前帧为关键帧
     if(!keyframe_updater->update(odom)) {
       std::lock_guard<std::mutex> lock(keyframe_queue_mutex);
       if(keyframe_queue.empty()) {
@@ -652,6 +658,10 @@ private:
     trans_odom2map = trans.matrix().cast<float>();
     trans_odom2map_mutex.unlock();
 
+	//创建新的关键帧快照指针vector，并将关键帧指针逐个拷贝到新vector
+	//拷贝完成后将keyframes_snapshot加锁，并将其与新的vector交换
+	//vector的交换是数据首尾指针以及容量指针的交换 swap
+	//避免了长时间加锁导致其他线程阻塞
     std::vector<KeyFrameSnapshot::Ptr> snapshot(keyframes.size());
     std::transform(keyframes.begin(), keyframes.end(), snapshot.begin(),
       [=](const KeyFrame::Ptr& k) {
