@@ -27,6 +27,7 @@
 #include <sensor_msgs/NavSatFix.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <geographic_msgs/GeoPointStamped.h>
+#include <gps_msgs/Utm.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <hdl_graph_slam/FloorCoeffs.h>
 
@@ -114,6 +115,7 @@ public:
       gps_sub = mt_nh.subscribe("/gps/geopoint", 1024, &HdlGraphSlamNodelet::gps_callback, this);
       nmea_sub = mt_nh.subscribe("/gpsimu_driver/nmea_sentence", 1024, &HdlGraphSlamNodelet::nmea_callback, this);
       navsat_sub = mt_nh.subscribe("/gps/navsat", 1024, &HdlGraphSlamNodelet::navsat_callback, this);
+      utm_sub = mt_nh.subscribe("/utm",1024,&HdlGraphSlamNodelet::utm_callback,this);
     }
 
     // publishers
@@ -341,6 +343,77 @@ private:
     gps_queue.erase(gps_queue.begin(), remove_loc);
     return updated;
   }
+  
+  void utm_callback(const gps_msgs::UtmPtr& utm_msg)
+  {
+  	std::lock_guard<std::mutex> lock(utm_queue_mutex);
+    utm_queue.push_back(utm_msg);
+  }
+  
+  bool flush_utm_queue() {
+    std::lock_guard<std::mutex> lock(utm_queue_mutex);
+
+    if(keyframes.empty() || utm_queue.empty()) {
+      return false;
+    }
+
+    bool updated = false;
+    auto utm_cursor = utm_queue.begin();
+
+    for(auto& keyframe : keyframes) {
+      if(keyframe->stamp > utm_queue.back()->header.stamp) {
+        break;
+      }
+
+      if(keyframe->stamp < (*utm_cursor)->header.stamp || keyframe->utm_coord) {
+        continue;
+      }
+
+      // find the utm data which is closest to the keyframe
+      auto closest_utm = utm_cursor;
+      for(auto utm = utm_cursor; utm != utm_queue.end(); utm++) {
+        auto dt = ((*closest_utm)->header.stamp - keyframe->stamp).toSec();
+        auto dt2 = ((*utm)->header.stamp - keyframe->stamp).toSec();
+        if(std::abs(dt) < std::abs(dt2)) {
+          break;
+        }
+
+        closest_utm = utm;
+      }
+
+      // if the time residual between the utm and keyframe is too large, skip it
+      if(0.2 < std::abs(((*closest_utm)->header.stamp - keyframe->stamp).toSec())) {
+        continue;
+      }
+
+      Eigen::Vector3d xyz((*closest_utm)->x, (*closest_utm)->y, 0);
+
+      // the first gps data position will be the origin of the map
+      if(!zero_utm) {
+        zero_utm = xyz;
+      }
+      xyz -= (*zero_utm);
+
+      keyframe->utm_coord = xyz;
+
+      g2o::OptimizableGraph::Edge* edge;
+      
+      Eigen::Matrix2d information_matrix = Eigen::Matrix2d::Identity() / utm_edge_stddev_xy;
+      edge = graph_slam->add_se3_prior_xy_edge(keyframe->node, xyz.head<2>(), information_matrix);
+     
+      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("utm_edge_robust_kernel", "NONE"), private_nh.param<double>("utm_edge_robust_kernel_size", 1.0));
+
+      updated = true;
+    }
+
+    auto remove_loc = std::upper_bound(utm_queue.begin(), utm_queue.end(), keyframes.back()->stamp,
+      [=](const ros::Time& stamp, const gps_msgs::UtmConstPtr& utm_point) {
+        return stamp < utm_point->header.stamp;
+      }
+    );
+    utm_queue.erase(utm_queue.begin(), remove_loc);
+    return updated;
+  }
 
   void imu_callback(const sensor_msgs::ImuPtr& imu_msg) {
     if(!enable_imu_orientation && !enable_imu_acceleration) {
@@ -552,7 +625,7 @@ private:
       read_until_pub.publish(read_until);
     }
 
-    if(!keyframe_updated & !flush_floor_queue() & !flush_gps_queue() &!flush_imu_queue()) {
+    if(!keyframe_updated & !flush_floor_queue() & !flush_gps_queue() &!flush_imu_queue() & !flush_utm_queue()) {
       return;
     }
 
@@ -894,6 +967,7 @@ private:
   ros::Subscriber gps_sub;
   ros::Subscriber nmea_sub;
   ros::Subscriber navsat_sub;
+  ros::Subscriber utm_sub;
 
   ros::Subscriber imu_sub;
   ros::Subscriber floor_sub;
@@ -928,7 +1002,12 @@ private:
   boost::optional<Eigen::Vector3d> zero_utm;
   std::mutex gps_queue_mutex;
   std::deque<geographic_msgs::GeoPointStampedConstPtr> gps_queue;
-
+  
+  //utm queue
+  double utm_edge_stddev_xy;
+  std::mutex utm_queue_mutex;
+  std::deque<gps_msgs::UtmConstPtr> utm_queue;
+  
   // imu queue
   double imu_time_offset;
   bool enable_imu_orientation;

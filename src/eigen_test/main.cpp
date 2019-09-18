@@ -25,8 +25,10 @@ int main()
 	
 	for(auto& num:num_deque)
 		cout << hex << &num  <<": "<<  dec << num<< endl;
-		
-		
+	
+	int a=10, b=20;
+	const int *ptr = &a;
+	ptr = &b;
 	
 	
 	return 0;
