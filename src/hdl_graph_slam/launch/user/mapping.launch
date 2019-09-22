@@ -2,7 +2,7 @@
 <launch>
   <!-- arguments -->
   <arg name="nodelet_manager" default="velodyne_nodelet_manager" />
-  <arg name="enable_gps" default="false" />
+  <arg name="enable_gps" default="true" />
   <arg name="enable_imu_acc" default="false" />
   <arg name="enable_imu_ori" default="false" />
   <arg name="points_topic" default="/floor_detection/floor_filtered_points" />
@@ -19,6 +19,7 @@
     <param name="g2o_solver_num_iterations" value="512" />
     <!-- keyframe registration params -->
     <param name="enable_gps" value="$(arg enable_gps)" />
+    <param name="utm_topic" value="/gps_odom"/>
     <param name="enable_imu_acceleration" value="$(arg enable_imu_acc)" />
     <param name="enable_imu_orientation" value="$(arg enable_imu_ori)" />
     <param name="max_keyframes_per_update" value="10" />

@@ -31,6 +31,7 @@ int main()
 	cout << "Transform matrix = \n" << T.matrix() <<endl;
 	
 	
+	Eigen::Vector3d pos(1.0,2.0,3.0);
 	
 	
 	

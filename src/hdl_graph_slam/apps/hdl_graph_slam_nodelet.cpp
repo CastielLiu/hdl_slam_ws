@@ -114,10 +114,14 @@ public:
     imu_sub = nh.subscribe("/gpsimu_driver/imu_data", 1024, &HdlGraphSlamNodelet::imu_callback, this);
     floor_sub = nh.subscribe("/floor_detection/floor_coeffs", 1024, &HdlGraphSlamNodelet::floor_coeffs_callback, this);
 
-    if(private_nh.param<bool>("enable_gps", true)) {
-      gps_sub = mt_nh.subscribe("/gps/geopoint", 1024, &HdlGraphSlamNodelet::gps_callback, this);
-      nmea_sub = mt_nh.subscribe("/gpsimu_driver/nmea_sentence", 1024, &HdlGraphSlamNodelet::nmea_callback, this);
-      navsat_sub = mt_nh.subscribe("/gps/navsat", 1024, &HdlGraphSlamNodelet::navsat_callback, this);
+    if(private_nh.param<bool>("enable_gps", false)) 
+    {
+		std::string utm_topic = private_nh.param<std::string>("utm_topic","/gps_odom");
+		utm_sub = mt_nh.subscribe(utm_topic,1024,&HdlGraphSlamNodelet::utm_callback,this);
+		
+		gps_sub = mt_nh.subscribe("/gps/geopoint", 1024, &HdlGraphSlamNodelet::gps_callback, this);
+		nmea_sub = mt_nh.subscribe("/gpsimu_driver/nmea_sentence", 1024, &HdlGraphSlamNodelet::nmea_callback, this);
+		navsat_sub = mt_nh.subscribe("/gps/navsat", 1024, &HdlGraphSlamNodelet::navsat_callback, this);
     }
 
     // publishers
@@ -351,6 +355,78 @@ private:
     gps_queue.erase(gps_queue.begin(), remove_loc);
     return updated;
   }
+  
+  void utm_callback(const nav_msgs::Odometry::Ptr& utm_msg)
+  {
+  	std::lock_guard<std::mutex> lock(utm_queue_mutex);
+    utm_queue.push_back(utm_msg);
+  }
+  
+  bool flush_utm_queue() {
+    std::lock_guard<std::mutex> lock(utm_queue_mutex);
+
+    if(keyframes.empty() || utm_queue.empty()) {
+      return false;
+    }
+
+    bool updated = false;
+    auto utm_cursor = utm_queue.begin();
+
+    for(auto& keyframe : keyframes) {
+      if(keyframe->stamp > utm_queue.back()->header.stamp) {
+        break;
+      }
+
+      if(keyframe->stamp < (*utm_cursor)->header.stamp || keyframe->utm_coord) {
+        continue;
+      }
+
+      // find the utm data which is closest to the keyframe
+      auto closest_utm = utm_cursor;
+      for(auto utm = utm_cursor; utm != utm_queue.end(); utm++) {
+        auto dt = ((*closest_utm)->header.stamp - keyframe->stamp).toSec();
+        auto dt2 = ((*utm)->header.stamp - keyframe->stamp).toSec();
+        if(std::abs(dt) < std::abs(dt2)) {
+          break;
+        }
+
+        closest_utm = utm;
+      }
+
+      // if the time residual between the utm and keyframe is too large, skip it
+      if(0.2 < std::abs(((*closest_utm)->header.stamp - keyframe->stamp).toSec())) {
+        continue;
+      }
+	  auto pose = (*closest_utm)->pose.pose.position;
+      Eigen::Vector3d xyz(pose.x, pose.y, 0);
+
+      // the first gps data position will be the origin of the map
+      if(!zero_utm) {
+        zero_utm = xyz;
+      }
+      xyz -= (*zero_utm);
+
+      keyframe->utm_coord = xyz;
+
+      g2o::OptimizableGraph::Edge* edge;
+      
+      Eigen::Matrix2d information_matrix = Eigen::Matrix2d::Identity() / utm_edge_stddev_xy;
+      edge = graph_slam->add_se3_prior_xy_edge(keyframe->node, xyz.head<2>(), information_matrix);
+     
+      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("utm_edge_robust_kernel", "NONE"), private_nh.param<double>("utm_edge_robust_kernel_size", 1.0));
+
+      updated = true;
+    }
+
+    auto remove_loc = std::upper_bound(utm_queue.begin(), utm_queue.end(), keyframes.back()->stamp,
+      [=](const ros::Time& stamp, const nav_msgs::Odometry::Ptr& utm_msg) {
+        return stamp < utm_msg->header.stamp;
+      }
+    );
+    utm_queue.erase(utm_queue.begin(), remove_loc);
+    return updated;
+  }
+  
 
   void imu_callback(const sensor_msgs::ImuPtr& imu_msg) {
     if(!enable_imu_orientation && !enable_imu_acceleration) {
@@ -562,7 +638,7 @@ private:
       read_until_pub.publish(read_until);
     }
 
-    if(!keyframe_updated & !flush_floor_queue() & !flush_gps_queue() &!flush_imu_queue()) {
+    if(!keyframe_updated & !flush_floor_queue() & !flush_gps_queue() &!flush_imu_queue() &!flush_utm_queue()) {
       return;
     }
 
@@ -895,18 +971,28 @@ private:
 		std::ofstream odom_file(req.destination);
 		if(!odom_file.is_open())
 		{
-			std::string info = std::string("open ") + req.destination + "failed!!";
-			res.info = info;
+			res.info = std::string("open ") + req.destination + "failed!!";
 			res.success = false;
+			return true;
 		}
+		res.info  = std::string("File ") + req.destination + "saved successfully";
+		
+		odom_file << "point_cloud_registrate_odom_x_y_z\t" << "optimizated_odom_x_y_z\t" <<"gps_x_y_z"<<  std::endl;
 		
 		for(int i=0; i<keyframes.size(); i++) 
 		{
-			Eigen::Vector3d pos = keyframes[i]->node->estimate().translation();
-			odom_file <<  std::endl;
+			Eigen::Vector3d pos1 = keyframes[i]->odom.translation(); //the odom from pointcloud registration
+			Eigen::Vector3d pos2 = keyframes[i]->node->estimate().translation(); //the odom after optimization
+			Eigen::Vector3d pos3 = *(keyframes[i]->utm_coord);  //the utm point from gps
+			odom_file << std::fixed << std::setprecision(3) << std::setw(7);
+			odom_file <<pos1[0] << "\t" << pos1[1] << "\t" << pos1[2]<< "\t"
+					  <<pos2[0] << "\t" << pos2[1] << "\t" << pos2[2]<< "\t"
+					  <<pos3[0] << "\t" << pos3[1] << "\t" << pos3[2]<< std::endl;
+					  
+					  
 		}
 		odom_file.close();
-  
+  		return true;
   }
   
 private:
@@ -921,6 +1007,7 @@ private:
   std::unique_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> cloud_sub;
   std::unique_ptr<message_filters::TimeSynchronizer<nav_msgs::Odometry, sensor_msgs::PointCloud2>> sync;
 
+  ros::Subscriber utm_sub;
   ros::Subscriber gps_sub;
   ros::Subscriber nmea_sub;
   ros::Subscriber navsat_sub;
@@ -959,6 +1046,12 @@ private:
   boost::optional<Eigen::Vector3d> zero_utm;
   std::mutex gps_queue_mutex;
   std::deque<geographic_msgs::GeoPointStampedConstPtr> gps_queue;
+  
+  //utm queue
+  double utm_edge_stddev_xy;
+  std::mutex utm_queue_mutex;
+  std::deque<nav_msgs::Odometry::Ptr> utm_queue;
+  
 
   // imu queue
   double imu_time_offset;
