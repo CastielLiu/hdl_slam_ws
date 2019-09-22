@@ -4,6 +4,7 @@
 #include <memory>
 #include <iomanip>
 #include <iostream>
+#include <fstream>
 #include <unordered_map>
 #include <boost/thread.hpp>
 #include <boost/filesystem.hpp>
@@ -32,6 +33,7 @@
 
 #include <hdl_graph_slam/SaveMap.h>
 #include <hdl_graph_slam/DumpGraph.h>
+#include <hdl_graph_slam/SaveOdom.h>
 
 #include <nodelet/nodelet.h>
 #include <pluginlib/class_list_macros.h>
@@ -124,6 +126,7 @@ public:
 
     dump_service_server = mt_nh.advertiseService("/hdl_graph_slam/dump", &HdlGraphSlamNodelet::dump_service, this);
     save_map_service_server = mt_nh.advertiseService("/hdl_graph_slam/save_map", &HdlGraphSlamNodelet::save_map_service, this);
+    save_odom_service_server = mt_nh.advertiseService("/hdl_graph_slam/save_odom",&HdlGraphSlamNodelet::save_odom_service,this);
 
     double graph_update_interval = private_nh.param<double>("graph_update_interval", 3.0);
     double map_cloud_update_interval = private_nh.param<double>("map_cloud_update_interval", 10.0);
@@ -879,6 +882,26 @@ private:
 
     return true;
   }
+  
+  bool save_odom_service(hdl_graph_slam::SaveOdom::Request& req, hdl_graph_slam::SaveOdom::Response& res) 
+  {
+		std::ofstream odom_file(req.destination);
+		if(!odom_file.is_open())
+		{
+			std::string info = std::string("open ") + req.destination + "failed!!";
+			res.info = info;
+			res.success = false;
+		}
+		
+		for(int i=0; i<keyframes.size(); i++) 
+		{
+			Eigen::Vector3d pos = keyframes[i]->node->estimate().translation();
+			odom_file <<  std::endl;
+		}
+		odom_file.close();
+  
+  }
+  
 private:
   // ROS
   ros::NodeHandle nh;
@@ -915,6 +938,7 @@ private:
 
   ros::ServiceServer dump_service_server;
   ros::ServiceServer save_map_service_server;
+  ros::ServiceServer save_odom_service_server;
 
   // keyframe queue
   std::string base_frame_id;

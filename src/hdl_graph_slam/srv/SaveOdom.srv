@@ -1,0 +1,5 @@
+
+string destination
+---
+bool success
+string info

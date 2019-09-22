@@ -49,6 +49,7 @@ add_message_files(FILES
 add_service_files(FILES
   SaveMap.srv
   DumpGraph.srv
+  SaveOdom.srv
 )
 
 generate_messages(DEPENDENCIES std_msgs)
