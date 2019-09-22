@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>convert_point_cloud</name>
+  <name>message_convert</name>
   <version>0.0.0</version>
-  <description>The convert_point_cloud package</description>
+  <description>The message_convert package</description>
 
   <!-- One maintainer tag required, multiple allowed, one person per tag -->
   <!-- Example:  -->
@@ -19,7 +19,7 @@
   <!-- Url tags are optional, but multiple are allowed, one per tag -->
   <!-- Optional attribute type can be: website, bugtracker, or repository -->
   <!-- Example: -->
-  <!-- <url type="website">http://wiki.ros.org/convert_point_cloud</url> -->
+  <!-- <url type="website">http://wiki.ros.org/message_convert</url> -->
 
 
   <!-- Author tags are optional, multiple are allowed, one per tag -->

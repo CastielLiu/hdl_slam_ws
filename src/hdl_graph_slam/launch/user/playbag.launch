@@ -3,17 +3,24 @@
 
 	<!-- param name="use_sim_time" value="false"/-->
 	
-	<arg name="bagFile" default="/home/zwei/wendao/data/20190828/xingzhenglou.bag"/>
+	<arg name="bagFile"/>
 	
 	
 	<node pkg="rosbag" type="play" name="rosbag" args="-r 0.5 $(arg bagFile)" output="screen">
 		<remap from="/pandar_points" to="/raw_points"/>
+		<remap from="/gps_odom" to="/odom_gps"/>
 	</node>
 	
-	<node name="convert_point_cloud_node" pkg="convert_point_cloud" type="convert_point_cloud_node">
+	<node name="convert_point_cloud_node" pkg="message_convert" type="convert_point_cloud_node">
 		<param name="in_topic_name" value="/raw_points"/>
 		<param name="out_topic_name" value="/velodyne_points"/>
 		<param name="frame_id" value="velodyne"/>
+	</node>
+	
+	<node name="convert_others_node" pkg="message_convert" type="convert_others_node">
+		<param name="gps_frame_id" value="/gps"/>
+		<param name="in_topic_utm" value="/odom_gps"/>
+		<param name="out_topic_utm" value="/gps_odom"/>
 	</node>
 
 </launch>

@@ -399,6 +399,10 @@ private:
       }
 	  auto pose = (*closest_utm)->pose.pose.position;
       Eigen::Vector3d xyz(pose.x, pose.y, 0);
+      
+      std::cout << std::fixed << std::setprecision(3) <<  pose.x << " " << pose.y << std::endl;
+      
+      std::cout << std::resetiosflags(std::ios::fixed);
 
       // the first gps data position will be the origin of the map
       if(!zero_utm) {

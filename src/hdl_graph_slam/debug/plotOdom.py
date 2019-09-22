@@ -22,7 +22,10 @@ def main(argv):
 	plt.plot(points[:,3],points[:,4],'b',label='optimize_odom')
 	
 	plt.plot(points[:,6],points[:,7],'k',label='gps_odom')
-	#plt.legend()
+	
+	plt.axis('equal')
+	
+	plt.legend()
 	plt.show()
 	
 if __name__=='__main__':
