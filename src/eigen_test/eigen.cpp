@@ -6,6 +6,32 @@
 
 using namespace std;
 
+Eigen::Quaterniond euler2Quaternion(const double roll, const double pitch, const double yaw)
+{
+	Eigen::AngleAxisd rollAngle(roll, Eigen::Vector3d::UnitX());
+	Eigen::AngleAxisd yawAngle(yaw, Eigen::Vector3d::UnitZ());
+	Eigen::AngleAxisd pitchAngle(pitch, Eigen::Vector3d::UnitY());
+	Eigen::Quaterniond q = rollAngle * yawAngle * pitchAngle;
+	return q;
+}
+
+Eigen::Matrix3d euler2Matrix(const double roll, const double pitch, const double yaw)
+{
+	Eigen::AngleAxisd rollAngle(Eigen::AngleAxisd(roll,Eigen::Vector3d::UnitX()));
+	Eigen::AngleAxisd pitchAngle(Eigen::AngleAxisd(pitch,Eigen::Vector3d::UnitY()));
+	Eigen::AngleAxisd yawAngle(Eigen::AngleAxisd(yaw,Eigen::Vector3d::UnitZ()));
+	 
+	Eigen::Matrix3d rotation_matrix;
+	rotation_matrix=yawAngle*pitchAngle*rollAngle;
+	return rotation_matrix;
+}
+
+double deg2rad(const double& deg)
+{
+	return deg*M_PI/180.0;
+}
+
+
 int main()
 {
 //	Eigen::Vector4f coffs({0.005,0.015,0.999,1.79});
@@ -35,47 +61,49 @@ int main()
 //	Eigen::Vector3d pos(1.0,2.0,3.0);
 //	
 
-	Eigen::Vector3d eulerAngle(-(90.0-81.)/180.0*M_PI,0.0,0.0);
-	Eigen::AngleAxisd rollAngle(Eigen::AngleAxisd(eulerAngle(2),Eigen::Vector3d::UnitX()));
-	Eigen::AngleAxisd pitchAngle(Eigen::AngleAxisd(eulerAngle(1),Eigen::Vector3d::UnitY()));
-	Eigen::AngleAxisd yawAngle(Eigen::AngleAxisd(eulerAngle(0),Eigen::Vector3d::UnitZ()));
-	
-	Eigen::Matrix3d rotation_matrix;
-	rotation_matrix=yawAngle*pitchAngle*rollAngle;
-	
-	//cout << rotation_matrix << endl;
-	
-	
-	ifstream in_file("add_gps.txt");
-	ofstream out_file("new.txt");
-	
-	if(!in_file)
-		return 0;
-	
-	string str;
-	getline(in_file,str);
-	
-	cout << str << endl;
-	
-	float nothing[6], x,y,z;
-	
-	while(in_file >> nothing[0] >> nothing[1] >>nothing[2] >> nothing[3]>>nothing[4]>>nothing[5] >> x >> y >>z )
-	{
-		Eigen::Vector3d Point(x,y,z);
-		Eigen::Vector3d newPoint = rotation_matrix * Point;
-		for(int i=0; i<6; ++i)
-			out_file << nothing[i] << "\t";
-		out_file << newPoint[0] << "\t" <<newPoint[1] << "\t" <<newPoint[2] << "\r\n";
-			
-		
-		cout << x <<" " << y <<" " << z << endl;
-	}
+//	Eigen::Vector3d eulerAngle(-(90.0-81.)/180.0*M_PI,0.0,0.0);
+//	Eigen::AngleAxisd rollAngle(Eigen::AngleAxisd(eulerAngle(2),Eigen::Vector3d::UnitX()));
+//	Eigen::AngleAxisd pitchAngle(Eigen::AngleAxisd(eulerAngle(1),Eigen::Vector3d::UnitY()));
+//	Eigen::AngleAxisd yawAngle(Eigen::AngleAxisd(eulerAngle(0),Eigen::Vector3d::UnitZ()));
+//	
+//	Eigen::Matrix3d rotation_matrix;
+//	rotation_matrix=yawAngle*pitchAngle*rollAngle;
+//	
+//	
 	
 	
-	 std::unique_ptr<Eigen::Isometry3d> updateOdomMatrix_; 
-	 
-	if(updateOdomMatrix_)
-		cout << "sdfsdfsda" << endl;
+	Eigen::Vector3d world2base_t = Eigen::Vector3d(3, 1, 0);
+	Eigen::Matrix3d world2base_m = euler2Matrix(0,0.0, deg2rad(30.0));
+	Eigen::Isometry3d world2baseT = Eigen::Isometry3d::Identity();
+	world2baseT.rotate(world2base_m);
+	world2baseT.pretranslate(world2base_t);
+	
+	Eigen::Vector3d world2map_t = Eigen::Vector3d(3, 3, 0);
+	Eigen::Matrix3d world2map_m = euler2Matrix(0,0,deg2rad(45.0));
+	Eigen::Isometry3d world2mapT = Eigen::Isometry3d::Identity();
+	world2mapT.rotate(world2map_m);
+	world2mapT.pretranslate(world2map_t);
+	
+	cout << world2base_m << endl;
+	cout << world2map_m << endl;
+	
+	Eigen::Isometry3d map2baseT = world2mapT.inverse() * world2baseT;
+	cout << map2baseT.linear().eulerAngles(2,1,0)*180.0/M_PI << endl;
+	auto t = map2baseT.translation();
+	cout << map2baseT.translation() << endl;
+	cout << sqrt(t[0]*t[0] + t[1]*t[1] + t[2]*t[2] ) << endl;
+	cout << " .............." << endl;
+
+	
+	
+	Eigen::Vector3d xyz(2,1,0);
+	
+	cout << world2baseT.inverse()*xyz << endl;
+	cout << world2mapT.inverse()*xyz << endl;
+	
+	cout << map2baseT.inverse() * xyz << endl;
+	
+	cout << map2baseT.inverse() * world2mapT.inverse() * world2baseT * xyz << endl;
 	
 	
 	
