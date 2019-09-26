@@ -57,13 +57,16 @@
 #include <g2o/edge_se3_priorvec.hpp>
 #include <g2o/edge_se3_priorquat.hpp>
 
+#include<message_filters/time_synchronizer.h>
+#include<message_filters/sync_policies/approximate_time.h>
+#include<geometry_msgs/Transform.h>
 
 namespace hdl_graph_slam {
 
 class HdlGraphSlamNodelet : public nodelet::Nodelet {
 public:
   typedef pcl::PointXYZI PointT;
-
+  typedef message_filters::sync_policies::ApproximateTime<nav_msgs::Odometry,nav_msgs::Odometry,sensor_msgs::PointCloud2> MySyncPolicy;
   HdlGraphSlamNodelet() {}
   virtual ~HdlGraphSlamNodelet() {}
 
@@ -105,20 +108,20 @@ public:
     imu_acceleration_edge_stddev = private_nh.param<double>("imu_acceleration_edge_stddev", 3.0);
 
     points_topic = private_nh.param<std::string>("points_topic", "/velodyne_poits");
-
+	std::string utm_topic = private_nh.param<std::string>("utm_topic","/gps_odom");
     // subscribers
     odom_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, "/odom", 256));
+    utm_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, utm_topic, 256));
     cloud_sub.reset(new message_filters::Subscriber<sensor_msgs::PointCloud2>(mt_nh, points_topic, 32));
-    sync.reset(new message_filters::TimeSynchronizer<nav_msgs::Odometry, sensor_msgs::PointCloud2>(*odom_sub, *cloud_sub, 32));
-    sync->registerCallback(boost::bind(&HdlGraphSlamNodelet::cloud_callback, this, _1, _2));
+    
+    sync.reset(new message_filters::Synchronizer<MySyncPolicy>(MySyncPolicy(10),*odom_sub,*utm_sub,*cloud_sub));
+	sync->registerCallback(boost::bind(&HdlGraphSlamNodelet::cloud_callback, this, _1, _2,_3));
+	
     imu_sub = nh.subscribe("/gpsimu_driver/imu_data", 1024, &HdlGraphSlamNodelet::imu_callback, this);
     floor_sub = nh.subscribe("/floor_detection/floor_coeffs", 1024, &HdlGraphSlamNodelet::floor_coeffs_callback, this);
 
     if(private_nh.param<bool>("enable_gps", false)) 
     {
-		std::string utm_topic = private_nh.param<std::string>("utm_topic","/gps_odom");
-		utm_sub = mt_nh.subscribe(utm_topic,1024,&HdlGraphSlamNodelet::utm_callback,this);
-		
 		gps_sub = mt_nh.subscribe("/gps/geopoint", 1024, &HdlGraphSlamNodelet::gps_callback, this);
 		nmea_sub = mt_nh.subscribe("/gpsimu_driver/nmea_sentence", 1024, &HdlGraphSlamNodelet::nmea_callback, this);
 		navsat_sub = mt_nh.subscribe("/gps/navsat", 1024, &HdlGraphSlamNodelet::navsat_callback, this);
@@ -149,7 +152,26 @@ private:
    * @param odom_msg
    * @param cloud_msg
    */
-  void cloud_callback(const nav_msgs::OdometryConstPtr& odom_msg, const sensor_msgs::PointCloud2::ConstPtr& cloud_msg) {
+  void cloud_callback(const nav_msgs::OdometryConstPtr& odom_msg,
+					  const nav_msgs::OdometryConstPtr& utm_msg,
+					  const sensor_msgs::PointCloud2::ConstPtr& cloud_msg) 
+  {
+  	if(!map2world)
+  	{
+		geometry_msgs::Transform trans;
+		trans.translation.x = utm_msg->pose.pose.position.x;
+		trans.translation.y = utm_msg->pose.pose.position.y;
+		trans.translation.z = utm_msg->pose.pose.position.z;
+		
+		trans.rotation.x = utm_msg->pose.pose.orientation.x;
+		trans.rotation.y = utm_msg->pose.pose.orientation.y;
+		trans.rotation.z = utm_msg->pose.pose.orientation.z;
+		trans.rotation.w = utm_msg->pose.pose.orientation.w;
+  		map2world = trans;
+  		
+  	}
+  		
+  	
     const ros::Time& stamp = odom_msg->header.stamp;
     //ros里程计msg转为欧拉变换矩阵4x4
     Eigen::Isometry3d odom = odom2isometry(odom_msg);
@@ -1009,9 +1031,9 @@ private:
 
   std::unique_ptr<message_filters::Subscriber<nav_msgs::Odometry>> odom_sub;
   std::unique_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> cloud_sub;
-  std::unique_ptr<message_filters::TimeSynchronizer<nav_msgs::Odometry, sensor_msgs::PointCloud2>> sync;
+  std::unique_ptr<message_filters::Subscriber<nav_msgs::Odometry>> utm_sub;
+  std::unique_ptr<message_filters::Synchronizer<MySyncPolicy>> sync;
 
-  ros::Subscriber utm_sub;
   ros::Subscriber gps_sub;
   ros::Subscriber nmea_sub;
   ros::Subscriber navsat_sub;
@@ -1047,7 +1069,9 @@ private:
   double gps_time_offset;
   double gps_edge_stddev_xy;
   double gps_edge_stddev_z;
+  boost::optional<geometry_msgs::Transform> map2world;
   boost::optional<Eigen::Vector3d> zero_utm;
+  
   std::mutex gps_queue_mutex;
   std::deque<geographic_msgs::GeoPointStampedConstPtr> gps_queue;
   

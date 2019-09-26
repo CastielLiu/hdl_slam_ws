@@ -119,3 +119,7 @@ target_link_libraries(hdl_graph_slam_nodelet
   ${G2O_TYPES_SLAM3D_ADDONS}
 )
 add_dependencies(hdl_graph_slam_nodelet ${PROJECT_NAME}_gencpp)
+
+add_library(debug_nodelet apps/debug_nodelet.cpp)
+target_link_libraries(debug_nodelet ${catkin_LIBRARIES} ${PCL_LIBRARIES})
+
