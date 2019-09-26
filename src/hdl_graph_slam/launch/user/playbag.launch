@@ -6,7 +6,7 @@
 	<arg name="bagFile"/>
 	
 	
-	<node pkg="rosbag" type="play" name="rosbag" args="-r 0.5 $(arg bagFile)" output="screen">
+	<node pkg="rosbag" type="play" name="rosbag" args="-r 1 $(arg bagFile)" output="screen">
 		<remap from="/pandar_points" to="/raw_points"/>
 		<remap from="/gps_odom" to="/odom_gps"/>
 	</node>
