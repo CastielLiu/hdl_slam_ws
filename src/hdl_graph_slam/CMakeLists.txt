@@ -17,6 +17,8 @@ find_package(catkin REQUIRED COMPONENTS
   sensor_msgs
   message_generation
   ndt_omp
+  eigen_conversions
+  tf_conversions
 )
 
 find_package(PCL 1.7 REQUIRED)

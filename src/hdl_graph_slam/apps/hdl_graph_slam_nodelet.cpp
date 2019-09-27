@@ -60,6 +60,8 @@
 #include<message_filters/time_synchronizer.h>
 #include<message_filters/sync_policies/approximate_time.h>
 #include<geometry_msgs/Transform.h>
+#include <eigen_conversions/eigen_msg.h>
+#include<fstream>
 
 namespace hdl_graph_slam {
 
@@ -156,50 +158,58 @@ private:
 					  const nav_msgs::OdometryConstPtr& utm_odom_msg,
 					  const sensor_msgs::PointCloud2::ConstPtr& cloud_msg) 
   {
-	geometry_msgs::Transform world_odom;
-	world_odom.translation.x = utm_odom_msg->pose.pose.position.x;
-	world_odom.translation.y = utm_odom_msg->pose.pose.position.y;
-	world_odom.translation.z = utm_odom_msg->pose.pose.position.z;
+	geometry_msgs::Transform pose_in_world;
+	pose_in_world.translation.x = utm_odom_msg->pose.pose.position.x;
+	pose_in_world.translation.y = utm_odom_msg->pose.pose.position.y;
+	pose_in_world.translation.z = utm_odom_msg->pose.pose.position.z;
 	
-	world_odom.rotation.x = utm_odom_msg->pose.pose.orientation.x;
-	world_odom.rotation.y = utm_odom_msg->pose.pose.orientation.y;
-	world_odom.rotation.z = utm_odom_msg->pose.pose.orientation.z;
-	world_odom.rotation.w = utm_odom_msg->pose.pose.orientation.w;
+	pose_in_world.rotation.x = utm_odom_msg->pose.pose.orientation.x;
+	pose_in_world.rotation.y = utm_odom_msg->pose.pose.orientation.y;
+	pose_in_world.rotation.z = utm_odom_msg->pose.pose.orientation.z;
+	pose_in_world.rotation.w = utm_odom_msg->pose.pose.orientation.w;
 	
-	Eigen::Isometry3d trans2world_isometry;
-	transformMsgToEigen(world_odom,trans2world_isometry);
+	Eigen::Isometry3d pose_in_world_isometry;
+	tf::transformMsgToEigen(pose_in_world, pose_in_world_isometry);
 	
-  	if(!map2world)
+  	if(!map_in_world)
   	{
-  		map2world = world_odom;
-  		map2world_isometry = trans2world_isometry;
-  		Eigen::Vector3d xyz(trans.translation.x, trans.translation.y, trans.translation.z);
+  		map_in_world = pose_in_world;
+  		map_in_world_isometry = pose_in_world_isometry;
+  		Eigen::Vector3d xyz(map_in_world->translation.x, map_in_world->translation.y, map_in_world->translation.z);
 		zero_utm = xyz;
   	}
   	
-	Eigen::Isometry3d odom = trans2world_isometry 
+  	if(!lidar2gps_isometry)
+  	{
+  		tf::StampedTransform tf_lidar2gps;
+		try
+		{
+			tf_listener.waitForTransform(utm_odom_msg->child_frame_id, cloud_msg->header.frame_id, ros::Time(0), ros::Duration(1.0));
+			tf_listener.lookupTransform(utm_odom_msg->child_frame_id, cloud_msg->header.frame_id, ros::Time(0), tf_lidar2gps);
 	
-	transformMsgToEigen(world_odom, Eigen::Isometry3d &e);
+		} catch (std::exception& e) 
+		{
+			std::cerr << "failed to find the transform from [" << utm_odom_msg->child_frame_id << "] to [" << cloud_msg->header.frame_id << "]!!" << std::endl;
+			return ;
+		}
+		Eigen::Isometry3d gps2lidar_isometry;
+		tf::transformTFToEigen(tf_lidar2gps.inverse(), gps2lidar_isometry);
+	
+		lidar2gps_isometry = gps2lidar_isometry.inverse();
+	}
 
-	auto orientation = utm_odom_msg->pose.pose.orientation;
-	auto position = utm_odom_msg->pose.pose.position;
-
-	Eigen::Quaterniond quat;
-	quat.w() = orientation.w;
-	quat.x() = orientation.x;
-	quat.y() = orientation.y;
-	quat.z() = orientation.z;
-
-	//欧氏变换矩阵 // 虽然称为3d，实质上是4＊4的矩阵
-	Eigen::Isometry3d isometry = Eigen::Isometry3d::Identity();
-	isometry.linear() = quat.toRotationMatrix(); //四元数转旋转矩阵
-	isometry.translation() = Eigen::Vector3d(position.x, position.y, position.z);
-
+	Eigen::Isometry3d odom = lidar2gps_isometry->inverse() * map_in_world_isometry.inverse() * pose_in_world_isometry;
+	
+	static std::ofstream outfile("/home/zwei/wendao/hdl_slam_ws/src/hdl_graph_slam/debug/data.txt");
+	outfile << std::fixed << std::setprecision(3);
+	
+	outfile << odom_msg->pose.pose.position.x <<"\t" << odom_msg->pose.pose.position.y << "\t" << odom_msg->pose.pose.position.z <<"\t";
+	outfile << odom.translation()[0] <<"\t" << odom.translation()[1] << "\t" << odom.translation()[2] <<"\t";
+	outfile << odom_msg->pose.pose.position.x <<"\t" << odom_msg->pose.pose.position.y << "\t" << odom_msg->pose.pose.position.z << std::endl;
+	outfile.flush();
 	
 	
-    const ros::Time& stamp = odom_msg->header.stamp;
-    //ros里程计msg转为欧拉变换矩阵4x4
-    Eigen::Isometry3d odom = odom2isometry(odom_msg);
+    const ros::Time& stamp = cloud_msg->header.stamp;
     
     pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
     pcl::fromROSMsg(*cloud_msg, *cloud);
@@ -1080,7 +1090,9 @@ private:
   ros::Publisher map_points_pub;
 
   tf::TransformListener tf_listener;
-
+  
+  boost::optional<Eigen::Isometry3d> lidar2gps_isometry;
+  
   ros::ServiceServer dump_service_server;
   ros::ServiceServer save_map_service_server;
   ros::ServiceServer save_odom_service_server;
@@ -1094,8 +1106,8 @@ private:
   double gps_time_offset;
   double gps_edge_stddev_xy;
   double gps_edge_stddev_z;
-  boost::optional<geometry_msgs::Transform> map2world;
-  Eigen::Isometry3d map2world_isometry;
+  boost::optional<geometry_msgs::Transform> map_in_world;
+  Eigen::Isometry3d map_in_world_isometry;
   boost::optional<Eigen::Vector3d> zero_utm;
   
   std::mutex gps_queue_mutex;

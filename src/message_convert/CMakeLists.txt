@@ -12,6 +12,11 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   sensor_msgs
   std_msgs
+  geodesy
+  tf
+  gps_msgs
+  eigen_conversions
+  gps_msgs
 )
 
 find_package(PCL 1.7 REQUIRED)
@@ -52,5 +57,6 @@ target_link_libraries(convert_point_cloud_node ${catkin_LIBRARIES} ${PCL_LIBRARI
 add_executable(convert_others_node src/convert_others.cpp)
 target_link_libraries(convert_others_node ${catkin_LIBRARIES} )
  
- 
+add_executable(translation_node src/translation.cpp)
+target_link_libraries(translation_node ${catkin_LIBRARIES} )
  

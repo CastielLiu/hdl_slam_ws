@@ -9,8 +9,8 @@ using namespace std;
 Eigen::Quaterniond euler2Quaternion(const double roll, const double pitch, const double yaw)
 {
 	Eigen::AngleAxisd rollAngle(roll, Eigen::Vector3d::UnitX());
-	Eigen::AngleAxisd yawAngle(yaw, Eigen::Vector3d::UnitZ());
 	Eigen::AngleAxisd pitchAngle(pitch, Eigen::Vector3d::UnitY());
+	Eigen::AngleAxisd yawAngle(yaw, Eigen::Vector3d::UnitZ());
 	Eigen::Quaterniond q = rollAngle * yawAngle * pitchAngle;
 	return q;
 }
@@ -78,11 +78,18 @@ int main()
 	world2baseT.rotate(world2base_m);
 	world2baseT.pretranslate(world2base_t);
 	
-	Eigen::Vector3d world2map_t = Eigen::Vector3d(3, 3, 0);
+	Eigen::Vector3d world2map_t = Eigen::Vector3d(3, 0, 0);
 	Eigen::Matrix3d world2map_m = euler2Matrix(0,0,deg2rad(45.0));
 	Eigen::Isometry3d world2mapT = Eigen::Isometry3d::Identity();
 	world2mapT.rotate(world2map_m);
 	world2mapT.pretranslate(world2map_t);
+	
+	Eigen::Vector3d xyz(2,1,0);
+	cout << world2mapT.inverse() * Eigen::Vector3d(3,3,0) << endl;
+	cout << world2mapT.inverse() * Eigen::Vector3d(0,3,0) << endl;
+	cout << world2mapT.inverse() * Eigen::Vector3d(1,2,0) << endl;
+	
+	return 0;
 	
 	cout << world2base_m << endl;
 	cout << world2map_m << endl;
@@ -95,8 +102,6 @@ int main()
 	cout << " .............." << endl;
 
 	
-	
-	Eigen::Vector3d xyz(2,1,0);
 	
 	cout << world2baseT.inverse()*xyz << endl;
 	cout << world2mapT.inverse()*xyz << endl;
