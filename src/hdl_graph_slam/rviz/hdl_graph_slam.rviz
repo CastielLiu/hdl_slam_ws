@@ -8,6 +8,7 @@ Panels:
         - /Status1
         - /Grid1
         - /TF1
+        - /PointCloud21
         - /MarkerArray1/Status1
         - /MarkerArray1/Namespaces1
       Splitter Ratio: 0.5
@@ -61,9 +62,11 @@ Visualization Manager:
         All Enabled: true
         base_link:
           Value: true
-        keyframe:
+        gps:
           Value: true
-        map:
+        gps_true:
+          Value: true
+        keyframe:
           Value: true
         odom:
           Value: true
@@ -75,13 +78,16 @@ Visualization Manager:
       Show Axes: true
       Show Names: true
       Tree:
-        map:
-          odom:
-            base_link:
-              velodyne:
-                {}
-            keyframe:
+        odom:
+          base_link:
+            gps:
               {}
+            velodyne:
+              {}
+          gps_true:
+            {}
+          keyframe:
+            {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -96,10 +102,10 @@ Visualization Manager:
       Color: 255; 255; 255
       Color Transformer: Intensity
       Decay Time: 0
-      Enabled: false
+      Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 0
+      Max Intensity: 255
       Min Color: 0; 0; 0
       Min Intensity: 0
       Name: PointCloud2
@@ -107,13 +113,13 @@ Visualization Manager:
       Queue Size: 10
       Selectable: true
       Size (Pixels): 3
-      Size (m): 0.00999999978
+      Size (m): 0.0299999993
       Style: Flat Squares
-      Topic: /hdl_graph_slam/map_points
+      Topic: /prefiltering/filtered_points
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
-      Value: false
+      Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -209,10 +215,7 @@ Visualization Manager:
       Marker Topic: /hdl_graph_slam/markers
       Name: MarkerArray
       Namespaces:
-        edges: true
-        imu: true
-        loop_close_radius: true
-        nodes: true
+        {}
       Queue Size: 100
       Value: true
     - Class: rviz/Axes
@@ -226,7 +229,7 @@ Visualization Manager:
   Global Options:
     Background Color: 48; 48; 48
     Default Light: true
-    Fixed Frame: map
+    Fixed Frame: odom
     Frame Rate: 30
   Name: root
   Tools:
@@ -247,25 +250,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/ThirdPersonFollower
-      Distance: 75.7451706
+      Distance: 91.0255127
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.0599999987
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 25.728672
-        Y: 6.14065266
-        Z: -4.23757338e-05
+        X: 3.79233956
+        Y: 9.16953468
+        Z: -1.90734863e-06
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.0500000007
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.00999999978
-      Pitch: 0.710203528
+      Pitch: 0.475398093
       Target Frame: <Fixed Frame>
       Value: ThirdPersonFollower (rviz)
-      Yaw: 0.49904263
+      Yaw: 4.76540279
     Saved: ~
 Window Geometry:
   Displays:
@@ -283,5 +286,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1857
-  X: 73
-  Y: 34
+  X: 63
+  Y: 24

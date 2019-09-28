@@ -31,12 +31,14 @@ public:
 
     initialize_params();
 
-    points_sub = nh.subscribe("/velodyne_points", 64, &PrefilteringNodelet::cloud_callback, this);
-    points_pub = nh.advertise<sensor_msgs::PointCloud2>("/filtered_points", 32);
+    points_sub = nh.subscribe(raw_points_topic, 64, &PrefilteringNodelet::cloud_callback, this);
+    points_pub = nh.advertise<sensor_msgs::PointCloud2>("/prefiltering/filtered_points", 32);
   }
 
 private:
-  void initialize_params() {
+  void initialize_params() 
+  {
+  	raw_points_topic = private_nh.param<std::string>("raw_points_topic","/velodyne_points");
     std::string downsample_method = private_nh.param<std::string>("downsample_method", "VOXELGRID");
     double downsample_resolution = private_nh.param<double>("downsample_resolution", 0.1);
 
@@ -76,6 +78,7 @@ private:
       pcl::RadiusOutlierRemoval<PointT>::Ptr rad(new pcl::RadiusOutlierRemoval<PointT>());
       rad->setRadiusSearch(radius);
       rad->setMinNeighborsInRadius(min_neighbors);
+      outlier_removal_filter = rad;
     } else {
       std::cout << "outlier_removal: NONE" << std::endl;
     }
@@ -173,6 +176,8 @@ private:
 
   tf::TransformListener tf_listener;
 
+  std::string raw_points_topic;
+  
   std::string base_link_frame;
 
   bool use_distance_filter;

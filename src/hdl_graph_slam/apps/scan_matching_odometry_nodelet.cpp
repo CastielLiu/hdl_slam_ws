@@ -6,6 +6,7 @@
 #include <ros/duration.h>
 #include <pcl_ros/point_cloud.h>
 #include <tf_conversions/tf_eigen.h>
+#include <tf/transform_listener.h>
 #include <tf/transform_broadcaster.h>
 
 #include <std_msgs/Time.h>
@@ -22,11 +23,19 @@
 #include <hdl_graph_slam/ros_utils.hpp>
 #include <hdl_graph_slam/registrations.hpp>
 
+#include<message_filters/time_synchronizer.h>
+#include<message_filters/sync_policies/approximate_time.h>
+#include <message_filters/subscriber.h>
+#include <message_filters/time_synchronizer.h>
+#include<geometry_msgs/Transform.h>
+#include <eigen_conversions/eigen_msg.h>
+
 namespace hdl_graph_slam {
 
 class ScanMatchingOdometryNodelet : public nodelet::Nodelet {
 public:
   typedef pcl::PointXYZI PointT;
+  typedef message_filters::sync_policies::ApproximateTime<nav_msgs::Odometry,sensor_msgs::PointCloud2> MySyncPolicy;
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
   ScanMatchingOdometryNodelet() {}
@@ -39,9 +48,13 @@ public:
 
     initialize_params();
 	
-    points_sub = nh.subscribe(points_topic , 256, &ScanMatchingOdometryNodelet::cloud_callback, this);
+    utm_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(nh, utm_topic, 256));
+    points_sub.reset(new message_filters::Subscriber<sensor_msgs::PointCloud2>(nh, points_topic, 32));
+    sync.reset(new message_filters::Synchronizer<MySyncPolicy>(MySyncPolicy(10),*utm_sub,*points_sub));
+	sync->registerCallback(boost::bind(&ScanMatchingOdometryNodelet::cloud_callback, this, _1, _2));
+	
     read_until_pub = nh.advertise<std_msgs::Header>("/scan_matching_odometry/read_until", 32);
-    odom_pub = nh.advertise<nav_msgs::Odometry>("/odom", 32);
+    odom_pub = nh.advertise<nav_msgs::Odometry>("/scan_matching_odometry/odom", 32);
   }
 
 private:
@@ -50,6 +63,7 @@ private:
    */
   void initialize_params() {
     auto& pnh = private_nh;
+    utm_topic = private_nh.param<std::string>("utm_topic","/gps_odom");
     points_topic = pnh.param<std::string>("points_topic", "/filtered_points");
     odom_frame_id = pnh.param<std::string>("odom_frame_id", "odom");
 
@@ -67,18 +81,24 @@ private:
     // select a downsample method (VOXELGRID, APPROX_VOXELGRID, NONE)
     std::string downsample_method = pnh.param<std::string>("downsample_method", "VOXELGRID");
     double downsample_resolution = pnh.param<double>("downsample_resolution", 0.1);
-    if(downsample_method == "VOXELGRID") {
+    if(downsample_method == "VOXELGRID") 
+    {
       std::cout << "downsample: VOXELGRID " << downsample_resolution << std::endl;
       boost::shared_ptr<pcl::VoxelGrid<PointT>> voxelgrid(new pcl::VoxelGrid<PointT>());
       voxelgrid->setLeafSize(downsample_resolution, downsample_resolution, downsample_resolution);
       downsample_filter = voxelgrid;
-    } else if(downsample_method == "APPROX_VOXELGRID") {
+    } 
+    else if(downsample_method == "APPROX_VOXELGRID") 
+    {
       std::cout << "downsample: APPROX_VOXELGRID " << downsample_resolution << std::endl;
       boost::shared_ptr<pcl::ApproximateVoxelGrid<PointT>> approx_voxelgrid(new pcl::ApproximateVoxelGrid<PointT>());
       approx_voxelgrid->setLeafSize(downsample_resolution, downsample_resolution, downsample_resolution);
       downsample_filter = approx_voxelgrid;
-    } else {
-      if(downsample_method != "NONE") {
+    } 
+    else 
+    {
+      if(downsample_method != "NONE") 
+      {
         std::cerr << "warning: unknown downsampling type (" << downsample_method << ")" << std::endl;
         std::cerr << "       : use passthrough filter" <<std::endl;
       }
@@ -94,10 +114,27 @@ private:
    * @brief callback for point clouds
    * @param cloud_msg  point cloud msg
    */
-  void cloud_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
-    if(!ros::ok()) {
+  void cloud_callback( const nav_msgs::OdometryConstPtr& utm_odom_msg, const sensor_msgs::PointCloud2ConstPtr& cloud_msg) 
+  {
+    if(!ros::ok())
       return;
+    
+    if(!gps2base)
+    {
+      tf::StampedTransform transform;
+      tf_listener.waitForTransform("base_link", utm_odom_msg->child_frame_id, ros::Time(0), ros::Duration(2.0));
+      tf_listener.lookupTransform("base_link", utm_odom_msg->child_frame_id, ros::Time(0), transform);
+      gps2base = tfTransform2matrix(transform);
     }
+    //the odom in the world frame
+    Eigen::Matrix4f worldOdom = odom2matrix(utm_odom_msg)*(*gps2base);
+    
+    if(!world2odom)
+  		world2odom = worldOdom;
+  	pose_gps = world2odom->inverse() * worldOdom;
+  	
+  	geometry_msgs::TransformStamped odom_trans_gps = matrix2transform(utm_odom_msg->header.stamp, pose_gps, odom_frame_id, "gps_true");
+    gps_odom_broadcaster.sendTransform(odom_trans_gps);
 
     pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
     pcl::fromROSMsg(*cloud_msg, *cloud);
@@ -139,8 +176,11 @@ private:
    * @param cloud  the input cloud
    * @return the relative pose between the input cloud and the keyframe cloud
    */
-  Eigen::Matrix4f matching(const ros::Time& stamp, const pcl::PointCloud<PointT>::ConstPtr& cloud) {
-    if(!keyframe) {
+  Eigen::Matrix4f matching(const ros::Time& stamp, const pcl::PointCloud<PointT>::ConstPtr& cloud) 
+  {
+    if(!keyframe) 
+    {
+      prev_pose_gps.setIdentity();
       prev_trans.setIdentity();
       keyframe_pose.setIdentity();
       keyframe_stamp = stamp;
@@ -153,7 +193,10 @@ private:
     registration->setInputSource(filtered);
 
     pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>()); 
-    registration->align(*aligned, prev_trans); //output the registrated pointcloud, must
+    
+    Eigen::Matrix4f guess = prev_pose_gps.inverse() * pose_gps;
+    
+    registration->align(*aligned, guess); //output the registrated pointcloud, must
 
     if(!registration->hasConverged()) {
       NODELET_INFO_STREAM("scan matching has not converged!!");
@@ -187,7 +230,8 @@ private:
     if(delta_trans > keyframe_delta_trans || delta_angle > keyframe_delta_angle || delta_time > keyframe_delta_time) {
       keyframe = filtered;
       registration->setInputTarget(keyframe);
-
+      
+      prev_pose_gps = pose_gps;
       keyframe_pose = odom;
       keyframe_stamp = stamp;
       prev_trans.setIdentity();
@@ -230,12 +274,16 @@ private:
   ros::NodeHandle nh;
   ros::NodeHandle private_nh;
 
-  ros::Subscriber points_sub;
+  std::unique_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> points_sub;
+  std::unique_ptr<message_filters::Subscriber<nav_msgs::Odometry>> utm_sub;
+  std::unique_ptr<message_filters::Synchronizer<MySyncPolicy>> sync;
 
   ros::Publisher odom_pub;
   tf::TransformBroadcaster odom_broadcaster;
   tf::TransformBroadcaster keyframe_broadcaster;
+  tf::TransformBroadcaster gps_odom_broadcaster;
 
+  std::string utm_topic;
   std::string points_topic;
   std::string odom_frame_id;
   ros::Publisher read_until_pub;
@@ -251,6 +299,10 @@ private:
   double max_acceptable_angle;
 
   // odometry calculation
+  boost::optional<Eigen::Matrix4f> world2odom; // the transform from world to odom
+  boost::optional<Eigen::Matrix4f> gps2base;  // the transform from gps to base
+  Eigen::Matrix4f prev_pose_gps;               // previous pose from gps
+  Eigen::Matrix4f pose_gps;                    // the pose get from gps
   Eigen::Matrix4f prev_trans;                  // previous estimated transform from keyframe
   Eigen::Matrix4f keyframe_pose;               // keyframe pose
   ros::Time keyframe_stamp;                    // keyframe time
@@ -259,6 +311,9 @@ private:
   //
   pcl::Filter<PointT>::Ptr downsample_filter;
   pcl::Registration<PointT, PointT>::Ptr registration;
+  
+  tf::TransformListener tf_listener;
+  
 };
 
 }

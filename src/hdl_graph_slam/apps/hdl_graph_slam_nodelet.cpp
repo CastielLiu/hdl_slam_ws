@@ -112,7 +112,7 @@ public:
     points_topic = private_nh.param<std::string>("points_topic", "/velodyne_poits");
 	std::string utm_topic = private_nh.param<std::string>("utm_topic","/gps_odom");
     // subscribers
-    odom_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, "/odom", 256));
+    odom_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, "/scan_matching_odometry/odom", 256));
     utm_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, utm_topic, 256));
     cloud_sub.reset(new message_filters::Subscriber<sensor_msgs::PointCloud2>(mt_nh, points_topic, 32));
     

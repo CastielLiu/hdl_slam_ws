@@ -37,15 +37,13 @@ public:
 
     initialize_params();
 
-    points_sub = nh.subscribe("/filtered_points", 256, &FloorDetectionNodelet::cloud_callback, this);
+    points_sub = nh.subscribe(points_topic , 256, &FloorDetectionNodelet::cloud_callback, this);
     floor_pub = nh.advertise<hdl_graph_slam::FloorCoeffs>("/floor_detection/floor_coeffs", 32);
 
     read_until_pub = nh.advertise<std_msgs::Header>("/floor_detection/read_until", 32);
     floor_filtered_pub = nh.advertise<sensor_msgs::PointCloud2>("/floor_detection/floor_filtered_points", 32);
     floor_points_pub = nh.advertise<sensor_msgs::PointCloud2>("/floor_detection/floor_points", 32);
-    
   }
-
 
 private:
   /**
@@ -178,14 +176,14 @@ private:
     	pcl::PointCloud<PointT>::Ptr inlier_cloud(new pcl::PointCloud<PointT>);
     	inlier_cloud->header = cloud->header;
     	inlier_cloud->reserve(cloud->size());
-    	double disCoffInvese = 1.0/sqrt(coeffs.head<3>().dot(coeffs.head<3>())); //1.0/aqrt(x*x+y*y+z*z)
+    	double disCoffInvese = 1.0/sqrt(coeffs.head<3>().dot(coeffs.head<3>())); //1.0/sqrt(A*A+B*B+C*C)
     	copy_if(cloud->begin(),cloud->end(),std::back_inserter(inlier_cloud->points),
 				[=](const PointT& point)
 				{
 					double dis = (coeffs[0]*point.x + coeffs[1]*point.y + coeffs[2]*point.z  +coeffs[3]) * disCoffInvese; //Ax+By+Cz+D
-					return dis > 0.1;
+					return dis > 0.05;
 				});
-		std::cout << inlier_cloud->size() << std::endl;
+		//std::cout << inlier_cloud->size() << std::endl;
 		floor_filtered_pub.publish(inlier_cloud);
     }
     

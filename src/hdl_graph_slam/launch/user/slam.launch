@@ -17,7 +17,7 @@
 
   <!-- prefiltering_nodelet -->
   <node pkg="nodelet" type="nodelet" name="prefiltering_nodelet" args="load hdl_graph_slam/PrefilteringNodelet $(arg nodelet_manager)">
-    <remap from="/velodyne_points" to="$(arg points_topic)" />
+	<param name="raw_points_topic" value="$(arg points_topic)" />
     <!-- in case base_link_frame is blank, mapping will be performed in the lidar frame -->
     <param name="base_link_frame" value="base_link" />
     <!-- distance filter -->
@@ -56,7 +56,7 @@
 
   <!-- floor_detection_nodelet -->
   <node pkg="nodelet" type="nodelet" name="floor_detection_nodelet" args="load hdl_graph_slam/FloorDetectionNodelet $(arg nodelet_manager)" if="$(arg enable_floor_detection)">
-    <param name="points_topic" value="$(arg points_topic)" />
+    <param name="points_topic" value="/prefiltering/filtered_points"/>
     <param name="tilt_deg" value="0.0" />
     <param name="sensor_height" value="1.8" />
     <param name="height_clip_range" value="0.5" />

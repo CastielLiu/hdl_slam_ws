@@ -48,12 +48,50 @@ static Eigen::Isometry3d odom2isometry(const nav_msgs::OdometryConstPtr& odom_ms
   quat.x() = orientation.x;
   quat.y() = orientation.y;
   quat.z() = orientation.z;
-
 //欧氏变换矩阵 // 虽然称为3d，实质上是4＊4的矩阵
   Eigen::Isometry3d isometry = Eigen::Isometry3d::Identity();
   isometry.linear() = quat.toRotationMatrix(); //四元数转旋转矩阵
   isometry.translation() = Eigen::Vector3d(position.x, position.y, position.z);
   return isometry;
+}
+
+static Eigen::Matrix4f odom2matrix(const nav_msgs::OdometryConstPtr& odom_msg)
+{
+	const auto& orientation = odom_msg->pose.pose.orientation;
+	const auto& position = odom_msg->pose.pose.position;
+	Eigen::Quaternionf quat;
+	quat.w() = orientation.w;
+	quat.x() = orientation.x;
+	quat.y() = orientation.y;
+	quat.z() = orientation.z;
+	
+	Eigen::Matrix4f matrix = Eigen::Matrix4f::Identity();
+	matrix.block<3,3>(0,0) = quat.matrix();
+	matrix(0,3) = position.x;
+	matrix(1,3) = position.y;
+	matrix(2,3) = position.z;
+	
+	return matrix;
+}
+
+static Eigen::Matrix4f tfTransform2matrix(const tf::Transform& trans)
+{
+	const auto& tf_quat = trans.getRotation();
+	const auto& tf_vector3 = trans.getOrigin();
+	
+	Eigen::Quaternionf quat;
+	quat.w() = tf_quat.getW();
+	quat.x() = tf_quat.getX();
+	quat.y() = tf_quat.getY();
+	quat.z() = tf_quat.getZ();
+	
+	Eigen::Matrix4f matrix = Eigen::Matrix4f::Identity();
+	matrix.block<3,3>(0,0) = quat.matrix();
+	matrix(0,3) = tf_vector3.getX();
+	matrix(1,3) = tf_vector3.getY();
+	matrix(2,3) = tf_vector3.getZ();
+	
+	return matrix;
 }
 
 }
