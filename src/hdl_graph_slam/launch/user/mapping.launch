@@ -70,5 +70,5 @@
     <param name="map_cloud_resolution" value="0.01" />
   </node>
 
-  <!-- node pkg="hdl_graph_slam" type="map2odom_publisher.py" name="map2odom_publisher" /-->
+  <node pkg="hdl_graph_slam" type="map2odom_publisher.py" name="map2odom_publisher"/>
 </launch>

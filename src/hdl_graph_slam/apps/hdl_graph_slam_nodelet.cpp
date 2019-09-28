@@ -147,7 +147,6 @@ public:
     optimization_timer = mt_nh.createWallTimer(ros::WallDuration(graph_update_interval), &HdlGraphSlamNodelet::optimization_timer_callback, this);
     map_publish_timer = mt_nh.createWallTimer(ros::WallDuration(map_cloud_update_interval), &HdlGraphSlamNodelet::map_points_publish_timer_callback, this);
   }
-
 private:
   /**
    * @brief received point clouds are pushed to #keyframe_queue
@@ -200,14 +199,17 @@ private:
 
 	Eigen::Isometry3d odom = lidar2gps_isometry->inverse() * map_in_world_isometry.inverse() * pose_in_world_isometry;
 	
-	static std::ofstream outfile("/home/zwei/wendao/hdl_slam_ws/src/hdl_graph_slam/debug/data.txt");
+//	Eigen::Isometry3d odom = odom2isometry(odom_msg);  
+
+	//record the odoms from different sensor to contrast 
+/*	static std::ofstream outfile("/home/zwei/wendao/hdl_slam_ws/src/hdl_graph_slam/debug/data.txt");
 	outfile << std::fixed << std::setprecision(3);
 	
 	outfile << odom_msg->pose.pose.position.x <<"\t" << odom_msg->pose.pose.position.y << "\t" << odom_msg->pose.pose.position.z <<"\t";
 	outfile << odom.translation()[0] <<"\t" << odom.translation()[1] << "\t" << odom.translation()[2] <<"\t";
 	outfile << odom_msg->pose.pose.position.x <<"\t" << odom_msg->pose.pose.position.y << "\t" << odom_msg->pose.pose.position.z << std::endl;
 	outfile.flush();
-	
+*/
 	
     const ros::Time& stamp = cloud_msg->header.stamp;
     
@@ -216,7 +218,6 @@ private:
     if(base_frame_id.empty()) {
       base_frame_id = cloud_msg->header.frame_id;
     }
-
 		//前后帧变换足够大时，更新累计路程，
 		//并记录当前帧位姿,当前帧为关键帧
     if(!keyframe_updater->update(odom)) {
@@ -421,7 +422,6 @@ private:
   
   bool flush_utm_queue() {
     std::lock_guard<std::mutex> lock(utm_queue_mutex);
-
     if(keyframes.empty() || utm_queue.empty()) {
       return false;
     }

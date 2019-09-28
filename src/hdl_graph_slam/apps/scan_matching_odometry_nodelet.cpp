@@ -178,7 +178,7 @@ private:
    */
   Eigen::Matrix4f matching(const ros::Time& stamp, const pcl::PointCloud<PointT>::ConstPtr& cloud) 
   {
-    if(!keyframe) 
+    if(!keyframe)
     {
       prev_pose_gps.setIdentity();
       prev_trans.setIdentity();
@@ -193,11 +193,14 @@ private:
     registration->setInputSource(filtered);
 
     pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>()); 
+    pcl::PointCloud<PointT>::Ptr aligned2(new pcl::PointCloud<PointT>());
     
+    //use gps generate the Prior pose
     Eigen::Matrix4f guess = prev_pose_gps.inverse() * pose_gps;
-    
-    registration->align(*aligned, guess); //output the registrated pointcloud, must
-
+    guess(2,3) = 0; //set z be zero, Poor altitude accuracy of GPS!
+   
+    registration->align(*aligned2, guess); //output the registrated pointcloud, must
+	
     if(!registration->hasConverged()) {
       NODELET_INFO_STREAM("scan matching has not converged!!");
       NODELET_INFO_STREAM("ignore this frame(" << stamp << ")");

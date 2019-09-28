@@ -11,6 +11,7 @@ Panels:
         - /PointCloud21
         - /MarkerArray1/Status1
         - /MarkerArray1/Namespaces1
+        - /Axes1
       Splitter Ratio: 0.5
     Tree Height: 728
   - Class: rviz/Selection
@@ -68,26 +69,29 @@ Visualization Manager:
           Value: true
         keyframe:
           Value: true
+        map:
+          Value: true
         odom:
           Value: true
         velodyne:
           Value: true
-      Marker Scale: 20
+      Marker Scale: 1
       Name: TF
       Show Arrows: true
       Show Axes: true
       Show Names: true
       Tree:
-        odom:
-          base_link:
-            gps:
+        map:
+          odom:
+            base_link:
+              gps:
+                {}
+              velodyne:
+                {}
+            gps_true:
               {}
-            velodyne:
+            keyframe:
               {}
-          gps_true:
-            {}
-          keyframe:
-            {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -115,7 +119,7 @@ Visualization Manager:
       Size (Pixels): 3
       Size (m): 0.0299999993
       Style: Flat Squares
-      Topic: /prefiltering/filtered_points
+      Topic: /hdl_graph_slam/map_points
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
@@ -215,7 +219,10 @@ Visualization Manager:
       Marker Topic: /hdl_graph_slam/markers
       Name: MarkerArray
       Namespaces:
-        {}
+        edges: true
+        imu: true
+        loop_close_radius: true
+        nodes: true
       Queue Size: 100
       Value: true
     - Class: rviz/Axes
@@ -229,7 +236,7 @@ Visualization Manager:
   Global Options:
     Background Color: 48; 48; 48
     Default Light: true
-    Fixed Frame: odom
+    Fixed Frame: map
     Frame Rate: 30
   Name: root
   Tools:
@@ -250,25 +257,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/ThirdPersonFollower
-      Distance: 91.0255127
+      Distance: 16.6460018
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.0599999987
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 3.79233956
-        Y: 9.16953468
-        Z: -1.90734863e-06
+        X: -1.21711826
+        Y: 1.26510799
+        Z: -4.17232513e-06
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.0500000007
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.00999999978
-      Pitch: 0.475398093
+      Pitch: 0.570398688
       Target Frame: <Fixed Frame>
       Value: ThirdPersonFollower (rviz)
-      Yaw: 4.76540279
+      Yaw: 4.7654047
     Saved: ~
 Window Geometry:
   Displays:

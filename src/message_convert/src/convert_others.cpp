@@ -42,7 +42,6 @@ public:
 		auto newMsg = *msg;
 		newMsg.header.stamp = ros::Time::now();
 		newMsg.header.frame_id = "world";
-		newMsg.pose.pose.orientation.w = msg->pose.pose.orientation.w;
 		pub_utm_.publish(newMsg);
 	}
 	
@@ -73,6 +72,11 @@ public:
 		Eigen::AngleAxisd rollAngle(deg2rad(inspvax_msg->roll), Eigen::Vector3d::UnitY());
 		Eigen::AngleAxisd yawAngle(-deg2rad(inspvax_msg->azimuth), Eigen::Vector3d::UnitZ());
 		Eigen::AngleAxisd pitchAngle(deg2rad(inspvax_msg->pitch), Eigen::Vector3d::UnitX());
+
+//		Eigen::AngleAxisd rollAngle(deg2rad(0.0), Eigen::Vector3d::UnitY());
+//		Eigen::AngleAxisd yawAngle(-deg2rad(inspvax_msg->azimuth), Eigen::Vector3d::UnitZ());
+//		Eigen::AngleAxisd pitchAngle(deg2rad(0.0), Eigen::Vector3d::UnitX());
+
 		Eigen::Quaterniond q = rollAngle * yawAngle * pitchAngle;
 	
 		ll2utm_msg->pose.pose.orientation.x = q.x();
