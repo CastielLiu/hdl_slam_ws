@@ -1,9 +1,8 @@
 #include <hdl_graph_slam/keyframe.hpp>
-
 #include <boost/filesystem.hpp>
-
 #include <pcl/io/pcd_io.h>
 #include <g2o/types/slam3d/vertex_se3.h>
+#include <yaml.h>
 
 namespace hdl_graph_slam {
 
@@ -19,6 +18,7 @@ KeyFrame::~KeyFrame() {
 
 }
 
+/*  
 void KeyFrame::dump(const std::string& directory) {
   if(!boost::filesystem::is_directory(directory)) {
     boost::filesystem::create_directory(directory);
@@ -46,6 +46,36 @@ void KeyFrame::dump(const std::string& directory) {
   pcl::io::savePCDFileBinary(directory + "/cloud.pcd", *cloud);
 
 }
+*/
+
+void KeyFrame::dump(const std::string& directory) {
+  if(!boost::filesystem::is_directory(directory)) {
+    boost::filesystem::create_directory(directory);
+  }
+
+  std::ofstream ofs(directory + "/data.yaml");
+  
+  YAML::Node data;
+  
+  auto estimateMatrix = node->estimate().matrix();
+  std::vector<double> estimateVector(estimateMatrix.data(), estimateMatrix.data()+estimateMatrix.size());
+  data["estimate"] = estimateVector;
+  
+  auto odomMatrix = odom.matrix();
+  std::vector<double> odomVector(odomMatrix.data(), odomMatrix.data()+odomMatrix.size());
+  data["odom"] = odomVector;
+
+  data["accum_distance"] = accum_distance ;
+
+  if(node) 
+    data["id"] = node->id() ;
+    
+  ofs << data ;
+  ofs.close();
+
+  pcl::io::savePCDFileBinary(directory + "/cloud.pcd", *cloud);
+}
+
 
 KeyFrameSnapshot::KeyFrameSnapshot(const Eigen::Isometry3d& pose, const pcl::PointCloud<PointT>::ConstPtr& cloud)
   : pose(pose),

@@ -15,6 +15,7 @@
 
 #include <nodelet/nodelet.h>
 #include <pluginlib/class_list_macros.h>
+#include <hdl_graph_slam/keyframe.hpp>
 
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/passthrough.h>
@@ -33,6 +34,7 @@
 #include<boost/filesystem.hpp>
 #include <boost/thread.hpp>
 #include <boost/bind.hpp>
+#include <yaml.h>
 
 namespace fs = boost::filesystem;
 
@@ -128,6 +130,34 @@ private:
     		++keyframe_cnt;
     }
     
+    keyframes.reserve(keyframe_cnt);
+    
+    for(size_t i=0; i<keyframe_cnt; ++i)
+    {
+    	std::stringstream path;
+    	path << boost::format("%s/%06d/") % keyframes_dir % i;
+    	
+    	pcl::PointCloud<PointT>::Ptr point_cloud(new pcl::PointCloud<PointT>);
+    	
+    	if(pcl::io::loadPCDFile<PointT> (path.str()+"cloud.pcd", *point_cloud) == -1)
+		    PCL_ERROR ("Couldn't read file %s *.*\n", (path.str()+"cloud.pcd").c_str());
+    	
+    	//KeyFrame(const ros::Time& stamp, const Eigen::Isometry3d& odom, double accum_distance, const pcl::PointCloud<PointT>::ConstPtr& cloud);
+    	KeyFrame::Ptr keyframe(new KeyFrame(ros::Time::now(),Eigen::Isometry3d::Identity(),0.0, point_cloud));
+    	
+    	YAML::Node data = YAML::LoadFile(path.str()+"data.yaml");
+    	
+    	auto odom = data["odom"].as<std::vector<double>>();
+    	
+    	Eigen::Map<Eigen::Matrix<double,4,4,Eigen::RowMajor> > odomMatrix(odom.data());
+    	
+    	keyframe->odom = odomMatrix;
+    	
+    	keyframe->accum_distance = data["accum_distance"].as<double>();
+    	
+    	keyframes.push_back(keyframe);
+    }
+    
     
     
   }
@@ -198,6 +228,7 @@ private:
    */
   Eigen::Matrix4f matching(const ros::Time& stamp, const pcl::PointCloud<PointT>::ConstPtr& cloud) 
   {
+  /*
     if(!keyframe)
     {
       prev_pose_gps.setIdentity();
@@ -261,6 +292,7 @@ private:
     }
 
     return odom;
+    */
   }
 
   /**
@@ -330,9 +362,9 @@ private:
   Eigen::Matrix4f prev_trans;                  // previous estimated transform from keyframe
   Eigen::Matrix4f keyframe_pose;               // keyframe pose
   ros::Time keyframe_stamp;                    // keyframe time
-  pcl::PointCloud<PointT>::ConstPtr keyframe;  // keyframe point cloud
+  
+  std::vector<KeyFrame::Ptr> keyframes;
 
-  //
   pcl::Filter<PointT>::Ptr downsample_filter;
   pcl::Registration<PointT, PointT>::Ptr registration;
   

@@ -74,6 +74,9 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
 )
 
+link_directories(/usr/local/lib)
+include_directories(/usr/local/include/yaml-cpp)
+
 # nodelets
 add_library(prefiltering_nodelet apps/prefiltering_nodelet.cpp)
 target_link_libraries(prefiltering_nodelet
@@ -119,11 +122,12 @@ target_link_libraries(hdl_graph_slam_nodelet
   ${G2O_SOLVER_CHOLMOD}
   ${G2O_TYPES_SLAM3D}
   ${G2O_TYPES_SLAM3D_ADDONS}
+  yaml-cpp
 )
 add_dependencies(hdl_graph_slam_nodelet ${PROJECT_NAME}_gencpp)
 
 add_library(location_nodelet apps/location_nodelet.cpp)
-target_link_libraries(location_nodelet ${catkin_LIBRARIES} ${PCL_LIBRARIES})
+target_link_libraries(location_nodelet ${catkin_LIBRARIES} ${PCL_LIBRARIES} yaml-cpp)
 
 add_library(debug_nodelet apps/debug_nodelet.cpp)
 target_link_libraries(debug_nodelet ${catkin_LIBRARIES} ${PCL_LIBRARIES})
