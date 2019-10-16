@@ -126,7 +126,11 @@ target_link_libraries(hdl_graph_slam_nodelet
 )
 add_dependencies(hdl_graph_slam_nodelet ${PROJECT_NAME}_gencpp)
 
-add_library(location_nodelet apps/location_nodelet.cpp)
+add_library(location_nodelet 
+  apps/location_nodelet.cpp 
+  src/hdl_graph_slam/keyframe.cpp
+  src/hdl_graph_slam/registrations.cpp
+)
 target_link_libraries(location_nodelet ${catkin_LIBRARIES} ${PCL_LIBRARIES} yaml-cpp)
 
 add_library(debug_nodelet apps/debug_nodelet.cpp)

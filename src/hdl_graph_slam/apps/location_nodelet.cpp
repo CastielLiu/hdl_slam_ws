@@ -31,6 +31,7 @@
 #include <geometry_msgs/Transform.h>
 #include <eigen_conversions/eigen_msg.h>
 
+#include <pcl/visualization/pcl_visualizer.h>
 #include<boost/filesystem.hpp>
 #include <boost/thread.hpp>
 #include <boost/bind.hpp>
@@ -46,10 +47,14 @@ public:
   typedef message_filters::sync_policies::ApproximateTime<nav_msgs::Odometry,sensor_msgs::PointCloud2> MySyncPolicy;
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-  LocationNodelet() {}
+  LocationNodelet() 
+  {
+  	is_first_frame = true;
+  }
   virtual ~LocationNodelet() {}
 
-  virtual void onInit() {
+  virtual void onInit() 
+  {
     NODELET_DEBUG("initializing scan_matching_odometry_nodelet...");
     nh = getNodeHandle();
     private_nh = getPrivateNodeHandle();
@@ -62,7 +67,8 @@ public:
     sync->registerCallback(boost::bind(&LocationNodelet::cloud_callback, this, _1, _2));
     
     odom_pub = nh.advertise<nav_msgs::Odometry>("/location/odom", 32);
-    boost::thread t(&LocationNodelet::load_keyframes,this);
+    //boost::thread t(&LocationNodelet::load_keyframes,this);
+    load_keyframes();
   }
 
 private:
@@ -158,8 +164,8 @@ private:
     	keyframes.push_back(keyframe);
     }
     
-    
-    
+    NODELET_INFO_STREAM("load keyframes ok ...");
+
   }
 
   /**
@@ -168,39 +174,101 @@ private:
    */
   void cloud_callback( const nav_msgs::OdometryConstPtr& utm_odom_msg, const sensor_msgs::PointCloud2ConstPtr& cloud_msg) 
   {
-    
-    if(!gps2base)
-    {
-      tf::StampedTransform transform;
-      tf_listener.waitForTransform("base_link", utm_odom_msg->child_frame_id, ros::Time(0), ros::Duration(2.0));
-      tf_listener.lookupTransform("base_link", utm_odom_msg->child_frame_id, ros::Time(0), transform);
-      gps2base = tfTransform2matrix(transform);
-    }
-    //the odom in the world frame
-    Eigen::Matrix4f worldOdom = odom2matrix(utm_odom_msg)*(*gps2base);
-    
-    if(!world2odom)
-  		world2odom = worldOdom;
-  	pose_gps = world2odom->inverse() * worldOdom;
-  	
-  	geometry_msgs::TransformStamped odom_trans_gps = matrix2transform(utm_odom_msg->header.stamp, pose_gps, odom_frame_id, "gps_true");
-    gps_odom_broadcaster.sendTransform(odom_trans_gps);
-
-    pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
+  	pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
     pcl::fromROSMsg(*cloud_msg, *cloud);
+    
+    auto filtered_points = downsample(cloud);
+    
+  	if(is_first_frame)
+  	{
+  		if(!seach_matching(filtered_points))
+  		{
+  			NODELET_INFO_STREAM("Unfamiliar environment !!!");
+  			return;
+  		}
+  		is_first_frame = false;
+  	}
+  	
+  	Eigen::Matrix4f pose = locating(filtered_points);
+  	publish_odometry(cloud_msg->header.stamp, cloud_msg->header.frame_id, pose);
+  }
+  
+  bool seach_matching(const pcl::PointCloud<PointT>::ConstPtr& filtered_points)
+  {
+  	first_trans.setIdentity();
+  	registration->setInputSource(filtered_points);
+  	pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>()); 
+  	std::vector<float> fitscores(keyframes.size(),100);
 
-    Eigen::Matrix4f pose = matching(cloud_msg->header.stamp, cloud);
-    publish_odometry(cloud_msg->header.stamp, cloud_msg->header.frame_id, pose);
-
-    // In offline estimation, point clouds until the published time will be supplied
-    std_msgs::HeaderPtr read_until(new std_msgs::Header());
-    read_until->frame_id = points_topic;
-    read_until->stamp = cloud_msg->header.stamp + ros::Duration(1, 0);
-    read_until_pub.publish(read_until);
-
-    read_until->frame_id = "/filtered_points";
-    read_until_pub.publish(read_until);
-
+  	for(size_t i=0; i<keyframes.size(); ++i)
+  	{
+//  	boost::shared_ptr<pcl::visualization::PCLVisualizer> mViewer1;
+//	  	mViewer1.reset(new pcl::visualization::PCLVisualizer("src Viewer"));
+//		mViewer1->setBackgroundColor (0, 0, 0); 
+//		pcl::visualization::PointCloudColorHandlerCustom<PointT> colored1(filtered_points, 0, 255, 0); 
+//		mViewer1->addPointCloud<PointT> (filtered_points,colored1, "src cloud"); 
+//		mViewer1->setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "src cloud");
+//		mViewer1->addCoordinateSystem (1.0);
+//		pcl::visualization::PointCloudColorHandlerCustom<PointT> colored2(keyframes[i]->cloud, 255, 0, 0); 
+//		mViewer1->addPointCloud<PointT> (keyframes[i]->cloud,colored2, "dst cloud"); 
+//		mViewer1->setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "dst cloud");
+//		mViewer1->spinOnce(200);
+		
+  		//NODELET_INFO_STREAM("matching "<< i << " frame ...");
+  		registration->setInputTarget(keyframes[i]->cloud);
+  		registration->align(*aligned, Eigen::Matrix4f::Identity());
+  		if(!registration->hasConverged())
+  		{
+		  NODELET_INFO_STREAM("scan matching has not converged, ignore this frame!");
+		  continue;
+		}
+		//NODELET_INFO_STREAM("scan matching has converged, score: "<< registration->getFitnessScore());
+		fitscores[i] = registration->getFitnessScore();
+		first_trans = registration->getFinalTransformation();
+		std::cout << first_trans << std::endl;
+  	}
+  	
+  	size_t best_frame_index = 0;
+  	float min_score = 100.0;
+  	for(size_t i=0; i<fitscores.size(); ++i)
+  	{
+  		if(fitscores[i] < min_score)
+  		{
+  			min_score = fitscores[i];
+  			best_frame_index = i;
+  		}
+  	}
+  	
+  	std::cout << "best_frame_index: " << best_frame_index << "   score: " << fitscores[best_frame_index] << std:: endl;
+  	
+  	if(min_score > 1.0)
+  		return false;
+  		
+  	current_match_index = best_frame_index;
+  	return true;
+  	
+  }
+  
+  Eigen::Matrix4f locating(const pcl::PointCloud<PointT>::ConstPtr& filtered_points)
+  {
+  	registration->setInputSource(filtered_points);
+  	pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>()); 
+  	float last_score = 100.;
+  	Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
+  	for(size_t index=current_match_index;true;index++)
+  	{
+  		registration->setInputTarget(keyframes[index]->cloud);
+  		registration->align(*aligned, Eigen::Matrix4f::Identity());
+  		if(last_score < registration->getFitnessScore())
+  		{
+  			current_match_index = index-1;
+  			break;
+  		}
+  		transform = registration->getFinalTransformation();
+  	}
+  	//return isometry2matrix(keyframes[current_match_index]->odom) * transform;
+  	return transform;
+  	
   }
 
   /**
@@ -369,6 +437,10 @@ private:
   pcl::Registration<PointT, PointT>::Ptr registration;
   
   tf::TransformListener tf_listener;
+  
+  bool is_first_frame;
+  size_t current_match_index;
+  Eigen::Matrix4f first_trans;
   
 };
 
