@@ -187,6 +187,7 @@ private:
   			return;
   		}
   		is_first_frame = false;
+  		std::cout << "seach first matching ok!" << std::endl;
   	}
   	
   	Eigen::Matrix4f pose = locating(filtered_points);
@@ -199,7 +200,7 @@ private:
   	registration->setInputSource(filtered_points);
   	pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>()); 
   	std::vector<float> fitscores(keyframes.size(),100);
-
+	std::cout << "seach first matching..." << std::endl;
   	for(size_t i=0; i<keyframes.size(); ++i)
   	{
 //  	boost::shared_ptr<pcl::visualization::PCLVisualizer> mViewer1;
@@ -225,7 +226,6 @@ private:
 		//NODELET_INFO_STREAM("scan matching has converged, score: "<< registration->getFitnessScore());
 		fitscores[i] = registration->getFitnessScore();
 		first_trans = registration->getFinalTransformation();
-		std::cout << first_trans << std::endl;
   	}
   	
   	size_t best_frame_index = 0;
@@ -264,10 +264,11 @@ private:
   			current_match_index = index-1;
   			break;
   		}
+  		last_score = registration->getFitnessScore();
   		transform = registration->getFinalTransformation();
   	}
-  	//return isometry2matrix(keyframes[current_match_index]->odom) * transform;
-  	return transform;
+  	return keyframes[current_match_index]->odom.matrix().cast<float>() * transform;
+//  	return transform;
   	
   }
 

@@ -55,16 +55,6 @@ static Eigen::Isometry3d odom2isometry(const nav_msgs::OdometryConstPtr& odom_ms
   return isometry;
 }
 
-//static Eigen::Matrix4f isometry2matrix(const Eigen::Isometry3d& isometry)
-//{
-//	Eigen::Matrix4f matrix = Eigen::Matrix4f::Identity();
-//	matrix.block<3,3>(0,0) = isometry.linear();
-//	auto xyz = isometry.translation();
-//	matrix(0,3) = xyz[0];
-//	matrix(1,3) = xyz[1];
-//	matrix(2,3) = xyz[2];
-//	return matrix;
-//}
 
 static Eigen::Matrix4f odom2matrix(const nav_msgs::OdometryConstPtr& odom_msg)
 {
