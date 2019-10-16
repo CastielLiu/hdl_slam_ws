@@ -22,8 +22,8 @@
     <param name="base_link_frame" value="base_link" />
     <!-- distance filter -->
     <param name="use_distance_filter" value="true" />
-    <param name="distance_near_thresh" value="0.5" />
-    <param name="distance_far_thresh" value="50.0" />
+     <param name="distance_near_thresh" value="2" />
+    <param name="distance_far_thresh" value="30.0" />
     <!-- NONE, VOXELGRID, or APPROX_VOXELGRID -->
     <param name="downsample_method" value="VOXELGRID" />
     <param name="downsample_resolution" value="0.1" />
@@ -40,7 +40,7 @@
     <param name="points_topic" value="/floor_detection/floor_filtered_points" />
     <param name="odom_frame_id" value="odom" />
     <param name="keyframe_delta_trans" value="0.25" />
-    <param name="keyframe_delta_angle" value="1.0" />
+    <param name="keyframe_delta_angle" value="1.0" />  <!-- 1.0 -->
     <param name="keyframe_delta_time" value="10.0" />
     <param name="transform_thresholding" value="false" />
     <param name="max_acceptable_trans" value="1.0" />
@@ -81,7 +81,7 @@
     <param name="enable_imu_acceleration" value="$(arg enable_imu_acc)" />
     <param name="enable_imu_orientation" value="$(arg enable_imu_ori)" />
     <param name="max_keyframes_per_update" value="10" />
-    <param name="keyframe_delta_trans" value="1.0" />
+    <param name="keyframe_delta_trans" value="0.5" />
     <param name="keyframe_delta_angle" value="2.0" />
     <!-- loop closure params -->
     <param name="distance_thresh" value="1.0" />

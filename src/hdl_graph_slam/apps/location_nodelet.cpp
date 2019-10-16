@@ -61,13 +61,12 @@ public:
 
     initialize_params();
     
-    utm_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(nh, utm_topic, 256));
-    points_sub.reset(new message_filters::Subscriber<sensor_msgs::PointCloud2>(nh, points_topic, 32));
+    utm_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(nh, utm_topic, 2));
+    points_sub.reset(new message_filters::Subscriber<sensor_msgs::PointCloud2>(nh, points_topic, 1));
     sync.reset(new message_filters::Synchronizer<MySyncPolicy>(MySyncPolicy(10),*utm_sub,*points_sub));
     sync->registerCallback(boost::bind(&LocationNodelet::cloud_callback, this, _1, _2));
     
-    odom_pub = nh.advertise<nav_msgs::Odometry>("/location/odom", 32);
-    //boost::thread t(&LocationNodelet::load_keyframes,this);
+    odom_pub = nh.advertise<nav_msgs::Odometry>("/location/odom", 1);
     load_keyframes();
   }
 
@@ -153,9 +152,9 @@ private:
     	
     	YAML::Node data = YAML::LoadFile(path.str()+"data.yaml");
     	
-    	auto odom = data["odom"].as<std::vector<double>>();
+    	auto odom = data["estimate"].as<std::vector<double>>();
     	
-    	Eigen::Map<Eigen::Matrix<double,4,4,Eigen::RowMajor> > odomMatrix(odom.data());
+    	Eigen::Map<Eigen::Matrix<double,4,4,Eigen::ColMajor> > odomMatrix(odom.data());
     	
     	keyframe->odom = odomMatrix;
     	
@@ -165,7 +164,6 @@ private:
     }
     
     NODELET_INFO_STREAM("load keyframes ok ...");
-
   }
 
   /**
@@ -174,6 +172,8 @@ private:
    */
   void cloud_callback( const nav_msgs::OdometryConstPtr& utm_odom_msg, const sensor_msgs::PointCloud2ConstPtr& cloud_msg) 
   {
+  	NODELET_INFO_STREAM("cloud_callback...");
+  	double now = ros::Time::now().toSec();
   	pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
     pcl::fromROSMsg(*cloud_msg, *cloud);
     
@@ -187,11 +187,12 @@ private:
   			return;
   		}
   		is_first_frame = false;
-  		std::cout << "seach first matching ok!" << std::endl;
+  		std::cout << "search first matching ok!" << std::endl;
   	}
   	
   	Eigen::Matrix4f pose = locating(filtered_points);
   	publish_odometry(cloud_msg->header.stamp, cloud_msg->header.frame_id, pose);
+  	std::cout << ros::Time::now().toSec()-now << std::endl;
   }
   
   bool seach_matching(const pcl::PointCloud<PointT>::ConstPtr& filtered_points)
@@ -200,8 +201,8 @@ private:
   	registration->setInputSource(filtered_points);
   	pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>()); 
   	std::vector<float> fitscores(keyframes.size(),100);
-	std::cout << "seach first matching..." << std::endl;
-  	for(size_t i=0; i<keyframes.size(); ++i)
+	
+  	for(size_t i=0; i<keyframes.size() && ros::ok(); ++i)
   	{
 //  	boost::shared_ptr<pcl::visualization::PCLVisualizer> mViewer1;
 //	  	mViewer1.reset(new pcl::visualization::PCLVisualizer("src Viewer"));
@@ -216,6 +217,7 @@ private:
 //		mViewer1->spinOnce(200);
 		
   		//NODELET_INFO_STREAM("matching "<< i << " frame ...");
+  		std::cout << "search first matching " << i << "/" << keyframes.size() <<  std::endl;
   		registration->setInputTarget(keyframes[i]->cloud);
   		registration->align(*aligned, Eigen::Matrix4f::Identity());
   		if(!registration->hasConverged())
@@ -251,25 +253,38 @@ private:
   
   Eigen::Matrix4f locating(const pcl::PointCloud<PointT>::ConstPtr& filtered_points)
   {
+  	static Eigen::Matrix4f guess = Eigen::Matrix4f::Identity();
+  	double now = ros::Time::now().toSec();
   	registration->setInputSource(filtered_points);
   	pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>()); 
-  	float last_score = 100.;
-  	Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
-  	for(size_t index=current_match_index;true;index++)
+
+	registration->setInputTarget(keyframes[current_match_index]->cloud);
+	registration->align(*aligned, guess);
+	
+	float score = registration->getFitnessScore();
+	Eigen::Matrix4f transform = registration->getFinalTransformation();
+	//guess = transform;
+	std::cout << "registration cost: " << ros::Time::now().toSec() - now << std::endl;
+  	std::cout << "current_match_index: " << current_match_index << std::endl;
+  	
+  	auto pose = keyframes[current_match_index]->odom.matrix().cast<float>() * transform;
+  	
+  	float max_dis2 = transform(0,3)*transform(0,3) + transform(1,3)*transform(1,3) + transform(2,3)*transform(2,3);
+  	for(size_t index=current_match_index+1; true; index++)
   	{
-  		registration->setInputTarget(keyframes[index]->cloud);
-  		registration->align(*aligned, Eigen::Matrix4f::Identity());
-  		if(last_score < registration->getFitnessScore())
+ 		index = index % keyframes.size();
+  		auto  nex_trans = keyframes[index]->odom.matrix().cast<float>().inverse()*pose;
+  		float dis2 = nex_trans(0,3)*nex_trans(0,3) + nex_trans(1,3)*nex_trans(1,3) + nex_trans(2,3)*nex_trans(2,3);
+  		if(dis2 > max_dis2)
   		{
-  			current_match_index = index-1;
+  			current_match_index = index==0? keyframes.size()-1:index-1;
   			break;
   		}
-  		last_score = registration->getFitnessScore();
-  		transform = registration->getFinalTransformation();
+  		max_dis2 = dis2;
+  		NODELET_INFO_STREAM("try to update match index...");
   	}
-  	return keyframes[current_match_index]->odom.matrix().cast<float>() * transform;
-//  	return transform;
   	
+  	return pose;
   }
 
   /**

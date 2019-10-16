@@ -21,8 +21,8 @@ public:
 			ROS_ERROR("topic name is empty!!");
 			return false;
 		}
-		sub_point_cloud_ = nh.subscribe(in_topic_name_,10,&Convert::point_cloud_callback,this);
-		pub_point_cloud_ = nh.advertise<sensor_msgs::PointCloud2>(out_topic_name_,10);
+		sub_point_cloud_ = nh.subscribe(in_topic_name_,0,&Convert::point_cloud_callback,this);
+		pub_point_cloud_ = nh.advertise<sensor_msgs::PointCloud2>(out_topic_name_,0);
 	}
 	void point_cloud_callback(const sensor_msgs::PointCloud2::ConstPtr& msg)
 	{

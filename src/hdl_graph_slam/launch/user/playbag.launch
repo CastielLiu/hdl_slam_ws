@@ -6,7 +6,7 @@
 	<arg name="bagFile"/>
 	
 	
-	<node pkg="rosbag" type="play" name="rosbag" args="-r 0.5 $(arg bagFile)" output="screen">
+	<node pkg="rosbag" type="play" name="rosbag" args="-r 1 -l $(arg bagFile)" output="screen">
 		<remap from="/gps_odom" to="/odom_gps"/>
 		<remap from="/ll2utm_odom" to="/odom_gps"/>
 		

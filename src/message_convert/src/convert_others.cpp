@@ -18,7 +18,6 @@
 
 using std::string;
 
-
 class Convert
 {
 public:
@@ -32,9 +31,9 @@ public:
 		bool is_utm = nh_.param<bool>("is_sub_utm","false");
 		
 		if(is_utm)
-			sub_utm_ = nh.subscribe(nh_.param<string>("in_topic_utm","/in_utm"),20,&Convert::utm_callback,this);
+			sub_utm_ = nh.subscribe(nh_.param<string>("in_topic_utm","/in_utm"),0,&Convert::utm_callback,this);
 		else
-			sub_inspvax_ = nh.subscribe("/gps",10,&Convert::inspvax_callback,this);
+			sub_inspvax_ = nh.subscribe("/gps",0,&Convert::inspvax_callback,this);
 		pub_utm_ = nh.advertise<nav_msgs::Odometry>(nh_.param<string>("out_topic_utm","/out_utm"),20);
 	}
 	void utm_callback(const nav_msgs::Odometry::ConstPtr& msg)

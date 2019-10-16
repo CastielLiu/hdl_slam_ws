@@ -70,12 +70,13 @@ private:
     pcl::fromROSMsg(*cloud_msg, *cloud);
 
     if(cloud->empty()) {
+    ROS_INFO("cloud is empty!");
       return;
     }
-
+	
     // floor detection
     boost::optional<Eigen::Vector4f> floor = detect(cloud);
-
+	
     // publish the detected floor coefficients
     hdl_graph_slam::FloorCoeffs coeffs;
     coeffs.header = cloud_msg->header;

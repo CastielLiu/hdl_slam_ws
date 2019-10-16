@@ -16,8 +16,8 @@
     <param name="base_link_frame" value="base_link" />
     <!-- distance filter -->
     <param name="use_distance_filter" value="true" />
-    <param name="distance_near_thresh" value="0.5" />
-    <param name="distance_far_thresh" value="50.0" />
+    <param name="distance_near_thresh" value="2.0" />
+    <param name="distance_far_thresh" value="30.0" />
     <!-- NONE, VOXELGRID, or APPROX_VOXELGRID -->
     <param name="downsample_method" value="VOXELGRID" />
     <param name="downsample_resolution" value="0.1" />
@@ -54,5 +54,6 @@
     <param name="keyframes_directory" value="/home/zwei/wendao/map/1_2019-09-27-14-04-43" />
     
   </node>
+
 
 </launch>

@@ -44,7 +44,6 @@ public:
     Eigen::Isometry3d delta = prev_keypose.inverse() * pose;
     double dx = delta.translation().norm();
     double da = std::acos(Eigen::Quaterniond(delta.linear()).w());
-
     // too close to the previous frame
     if(dx < keyframe_delta_trans && da < keyframe_delta_angle) {
       return false;

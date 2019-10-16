@@ -91,6 +91,7 @@ private:
   }
 
   void cloud_callback(pcl::PointCloud<PointT>::ConstPtr src_cloud) {
+  	//double now = ros::Time::now().toSec();
     if(src_cloud->empty()) {
       return;
     }
@@ -116,9 +117,10 @@ private:
 
     pcl::PointCloud<PointT>::ConstPtr filtered = distance_filter(src_cloud);
     filtered = downsample(filtered);
-    filtered = outlier_removal(filtered);
+    //filtered = outlier_removal(filtered);
 
     points_pub.publish(filtered);
+    //ROS_INFO_STREAM(ros::this_node::getName() << ": cost " << ros::Time::now().toSec()-now);
   }
 
   pcl::PointCloud<PointT>::ConstPtr downsample(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
@@ -154,7 +156,27 @@ private:
     std::copy_if(cloud->begin(), cloud->end(), std::back_inserter(filtered->points),
       [&](const PointT& p) {
         double d = p.getVector3fMap().norm();
-        return d > distance_near_thresh && d < distance_far_thresh;
+        return d > distance_near_thresh && d < distance_far_thresh && p.z <2.0;
+      }
+    );
+
+    filtered->width = filtered->size();
+    filtered->height = 1;
+    filtered->is_dense = false;
+
+    filtered->header = cloud->header;
+
+    return filtered;
+  }
+  
+  pcl::PointCloud<PointT>::ConstPtr xyz_distance_filter(const pcl::PointCloud<PointT>::ConstPtr& cloud) const 
+  {
+    pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>());
+    filtered->reserve(cloud->size());
+
+    std::copy_if(cloud->begin(), cloud->end(), std::back_inserter(filtered->points),
+      [&](const PointT& p) {
+        return  !((fabs(p.x) <2.0 || fabs(p.y) <2.0) || (fabs(p.x) >40.0 || fabs(p.y)>40.0) || p.z >2.0);
       }
     );
 
