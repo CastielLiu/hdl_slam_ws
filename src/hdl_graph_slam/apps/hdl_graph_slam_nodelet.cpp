@@ -62,6 +62,7 @@
 #include<geometry_msgs/Transform.h>
 #include <eigen_conversions/eigen_msg.h>
 #include<fstream>
+#include <yaml.h>
 
 namespace hdl_graph_slam {
 
@@ -84,7 +85,7 @@ public:
     odom_frame_id = private_nh.param<std::string>("odom_frame_id", "odom");
     map_cloud_resolution = private_nh.param<double>("map_cloud_resolution", 0.05);
     trans_odom2map.setIdentity();
-
+	base_frame_id = private_nh.param<std::string>("base_frame_id", "base_link");
     max_keyframes_per_update = private_nh.param<int>("max_keyframes_per_update", 10);
 
     //
@@ -157,47 +158,44 @@ private:
 					  const nav_msgs::OdometryConstPtr& utm_odom_msg,
 					  const sensor_msgs::PointCloud2::ConstPtr& cloud_msg) 
   {
-	geometry_msgs::Transform pose_in_world;
-	pose_in_world.translation.x = utm_odom_msg->pose.pose.position.x;
-	pose_in_world.translation.y = utm_odom_msg->pose.pose.position.y;
-	pose_in_world.translation.z = utm_odom_msg->pose.pose.position.z;
+	geometry_msgs::Transform gps_in_world;
+	gps_in_world.translation.x = utm_odom_msg->pose.pose.position.x;
+	gps_in_world.translation.y = utm_odom_msg->pose.pose.position.y;
+	gps_in_world.translation.z = utm_odom_msg->pose.pose.position.z;
 	
-	pose_in_world.rotation.x = utm_odom_msg->pose.pose.orientation.x;
-	pose_in_world.rotation.y = utm_odom_msg->pose.pose.orientation.y;
-	pose_in_world.rotation.z = utm_odom_msg->pose.pose.orientation.z;
-	pose_in_world.rotation.w = utm_odom_msg->pose.pose.orientation.w;
+	gps_in_world.rotation.x = utm_odom_msg->pose.pose.orientation.x;
+	gps_in_world.rotation.y = utm_odom_msg->pose.pose.orientation.y;
+	gps_in_world.rotation.z = utm_odom_msg->pose.pose.orientation.z;
+	gps_in_world.rotation.w = utm_odom_msg->pose.pose.orientation.w;
 	
-	Eigen::Isometry3d pose_in_world_isometry;
-	tf::transformMsgToEigen(pose_in_world, pose_in_world_isometry);
+	Eigen::Isometry3d gps_in_world_isometry;
+	tf::transformMsgToEigen(gps_in_world, gps_in_world_isometry);
 	
-  	if(!map_in_world)
+	if(!gps_in_base_isometry)
   	{
-  		map_in_world = pose_in_world;
-  		map_in_world_isometry = pose_in_world_isometry;
-  		Eigen::Vector3d xyz(map_in_world->translation.x, map_in_world->translation.y, map_in_world->translation.z);
-		zero_utm = xyz;
-  	}
-  	
-  	if(!lidar2gps_isometry)
-  	{
-  		tf::StampedTransform tf_lidar2gps;
+  		tf::StampedTransform tf_gps2base;
 		try
 		{
-			tf_listener.waitForTransform(utm_odom_msg->child_frame_id, cloud_msg->header.frame_id, ros::Time(0), ros::Duration(1.0));
-			tf_listener.lookupTransform(utm_odom_msg->child_frame_id, cloud_msg->header.frame_id, ros::Time(0), tf_lidar2gps);
-	
+			tf_listener.waitForTransform(base_frame_id ,utm_odom_msg->child_frame_id, ros::Time(0), ros::Duration(1.0));
+			tf_listener.lookupTransform(base_frame_id , utm_odom_msg->child_frame_id, ros::Time(0), tf_gps2base);
 		} catch (std::exception& e) 
 		{
-			std::cerr << "failed to find the transform from [" << utm_odom_msg->child_frame_id << "] to [" << cloud_msg->header.frame_id << "]!!" << std::endl;
+			std::cerr << "failed to find the transform from [" << base_frame_id << "] to [" << utm_odom_msg->child_frame_id << "]!!" << std::endl;
 			return ;
 		}
-		Eigen::Isometry3d gps2lidar_isometry;
-		tf::transformTFToEigen(tf_lidar2gps.inverse(), gps2lidar_isometry);
-	
-		lidar2gps_isometry = gps2lidar_isometry.inverse();
+		tf::transformTFToEigen(tf_gps2base.inverse(), *gps_in_base_isometry);
 	}
+	
+	auto base_in_world_isometry = gps_in_base_isometry->inverse() * gps_in_world_isometry;
+	
+  	if(!map_in_world_isometry)
+  	{
+  		map_in_world_isometry = base_in_world_isometry;
+  		Eigen::Vector3d xyz(gps_in_world.translation.x, gps_in_world.translation.y, gps_in_world.translation.z);
+		zero_utm = xyz;
+  	}
 
-	Eigen::Isometry3d odom = lidar2gps_isometry->inverse() * map_in_world_isometry.inverse() * pose_in_world_isometry;
+	Eigen::Isometry3d odom = map_in_world_isometry->inverse() * base_in_world_isometry;
 	
 //	Eigen::Isometry3d odom = odom2isometry(odom_msg);  
 
@@ -979,9 +977,16 @@ private:
       keyframes[i]->dump(sst.str());
     }
 
-    if(zero_utm) {
-      std::ofstream zero_utm_ofs(directory + "/zero_utm");
-      zero_utm_ofs << *zero_utm << std::endl;
+    if(map_in_world_isometry) 
+    {
+      std::ofstream ofs(directory + "/map_in_world.yaml");
+	  YAML::Node data;
+	  auto matrix = map_in_world_isometry->matrix();
+	  std::vector<double> matrixVector(matrix.data(), matrix.data()+matrix.size());
+	  data["matrix"] = matrixVector;
+	
+	  ofs << data ;
+	  ofs.close();
     }
 
     res.success = true;
@@ -1091,7 +1096,7 @@ private:
 
   tf::TransformListener tf_listener;
   
-  boost::optional<Eigen::Isometry3d> lidar2gps_isometry;
+  boost::optional<Eigen::Isometry3d> gps_in_base_isometry;
   
   ros::ServiceServer dump_service_server;
   ros::ServiceServer save_map_service_server;
@@ -1106,8 +1111,7 @@ private:
   double gps_time_offset;
   double gps_edge_stddev_xy;
   double gps_edge_stddev_z;
-  boost::optional<geometry_msgs::Transform> map_in_world;
-  Eigen::Isometry3d map_in_world_isometry;
+  boost::optional<Eigen::Isometry3d> map_in_world_isometry;
   boost::optional<Eigen::Vector3d> zero_utm;
   
   std::mutex gps_queue_mutex;

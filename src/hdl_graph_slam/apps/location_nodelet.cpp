@@ -55,7 +55,7 @@ public:
 
   virtual void onInit() 
   {
-    NODELET_DEBUG("initializing scan_matching_odometry_nodelet...");
+    NODELET_DEBUG("initializing location_nodelet...");
     nh = getNodeHandle();
     private_nh = getPrivateNodeHandle();
 
@@ -152,7 +152,7 @@ private:
     	
     	YAML::Node data = YAML::LoadFile(path.str()+"data.yaml");
     	
-    	auto odom = data["estimate"].as<std::vector<double>>();
+    	auto odom = data["odom"].as<std::vector<double>>();
     	
     	Eigen::Map<Eigen::Matrix<double,4,4,Eigen::ColMajor> > odomMatrix(odom.data());
     	
@@ -163,6 +163,13 @@ private:
     	keyframes.push_back(keyframe);
     }
     
+    YAML::Node data = YAML::LoadFile(keyframes_dir + "/map_in_world.yaml");
+    
+    auto map_in_world_vector = data["matrix"].as<std::vector<float>>();
+    
+    Eigen::Map<Eigen::Matrix<float,4,4,Eigen::ColMajor> > map_in_worldMatrix(map_in_world_vector.data());
+    map_in_world = map_in_worldMatrix;
+    
     NODELET_INFO_STREAM("load keyframes ok ...");
   }
 
@@ -172,8 +179,8 @@ private:
    */
   void cloud_callback( const nav_msgs::OdometryConstPtr& utm_odom_msg, const sensor_msgs::PointCloud2ConstPtr& cloud_msg) 
   {
-  	NODELET_INFO_STREAM("cloud_callback...");
-  	double now = ros::Time::now().toSec();
+  	//NODELET_INFO_STREAM("cloud_callback...");
+//  	double now = ros::Time::now().toSec();
   	pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
     pcl::fromROSMsg(*cloud_msg, *cloud);
     
@@ -190,14 +197,14 @@ private:
   		std::cout << "search first matching ok!" << std::endl;
   	}
   	
-  	Eigen::Matrix4f pose = locating(filtered_points);
+  	Eigen::Matrix4f pose = locating(filtered_points); //local_pose
+  	
   	publish_odometry(cloud_msg->header.stamp, cloud_msg->header.frame_id, pose);
-  	std::cout << ros::Time::now().toSec()-now << std::endl;
+  	//std::cout << ros::Time::now().toSec()-now << std::endl;
   }
   
   bool seach_matching(const pcl::PointCloud<PointT>::ConstPtr& filtered_points)
   {
-  	first_trans.setIdentity();
   	registration->setInputSource(filtered_points);
   	pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>()); 
   	std::vector<float> fitscores(keyframes.size(),100);
@@ -227,7 +234,6 @@ private:
 		}
 		//NODELET_INFO_STREAM("scan matching has converged, score: "<< registration->getFitnessScore());
 		fitscores[i] = registration->getFitnessScore();
-		first_trans = registration->getFinalTransformation();
   	}
   	
   	size_t best_frame_index = 0;
@@ -264,7 +270,7 @@ private:
 	float score = registration->getFitnessScore();
 	Eigen::Matrix4f transform = registration->getFinalTransformation();
 	//guess = transform;
-	std::cout << "registration cost: " << ros::Time::now().toSec() - now << std::endl;
+	//std::cout << "registration cost: " << ros::Time::now().toSec() - now << std::endl;
   	std::cout << "current_match_index: " << current_match_index << std::endl;
   	
   	auto pose = keyframes[current_match_index]->odom.matrix().cast<float>() * transform;
@@ -281,7 +287,7 @@ private:
   			break;
   		}
   		max_dis2 = dis2;
-  		NODELET_INFO_STREAM("try to update match index...");
+  		//NODELET_INFO_STREAM("try to update match index...");
   	}
   	
   	return pose;
@@ -304,80 +310,7 @@ private:
     return filtered;
   }
 
-  /**
-   * @brief estimate the relative pose between an input cloud and a keyframe cloud
-   * @param stamp  the timestamp of the input cloud
-   * @param cloud  the input cloud
-   * @return the relative pose between the input cloud and the keyframe cloud
-   */
-  Eigen::Matrix4f matching(const ros::Time& stamp, const pcl::PointCloud<PointT>::ConstPtr& cloud) 
-  {
-  /*
-    if(!keyframe)
-    {
-      prev_pose_gps.setIdentity();
-      prev_trans.setIdentity();
-      keyframe_pose.setIdentity();
-      keyframe_stamp = stamp;
-      keyframe = downsample(cloud);
-      registration->setInputTarget(keyframe);
-      return Eigen::Matrix4f::Identity();
-    }
-
-    auto filtered = downsample(cloud);
-    registration->setInputSource(filtered);
-
-    pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>()); 
-    pcl::PointCloud<PointT>::Ptr aligned2(new pcl::PointCloud<PointT>());
-    
-    //use gps generate the Prior pose
-    Eigen::Matrix4f guess = prev_pose_gps.inverse() * pose_gps;
-    guess(2,3) = 0; //set z be zero, Poor altitude accuracy of GPS!
-   
-    registration->align(*aligned2, guess); //output the registrated pointcloud, must
-	
-    if(!registration->hasConverged()) {
-      NODELET_INFO_STREAM("scan matching has not converged!!");
-      NODELET_INFO_STREAM("ignore this frame(" << stamp << ")");
-      return keyframe_pose * prev_trans;
-    }
-
-    Eigen::Matrix4f trans = registration->getFinalTransformation();
-    Eigen::Matrix4f odom = keyframe_pose * trans;
-
-    if(transform_thresholding) {
-      Eigen::Matrix4f delta = prev_trans.inverse() * trans;
-      double dx = delta.block<3, 1>(0, 3).norm();
-      double da = std::acos(Eigen::Quaternionf(delta.block<3, 3>(0, 0)).w());
-
-      if(dx > max_acceptable_trans || da > max_acceptable_angle) {
-        NODELET_INFO_STREAM("too large transform!!  " << dx << "[m] " << da << "[rad]");
-        NODELET_INFO_STREAM("ignore this frame(" << stamp << ")");
-        return keyframe_pose * prev_trans;
-      }
-    }
-
-    prev_trans = trans;
-
-    auto keyframe_trans = matrix2transform(stamp, keyframe_pose, odom_frame_id, "keyframe");
-    keyframe_broadcaster.sendTransform(keyframe_trans);
-
-    double delta_trans = trans.block<3, 1>(0, 3).norm();
-    double delta_angle = std::acos(Eigen::Quaternionf(trans.block<3, 3>(0, 0)).w());
-    double delta_time = (stamp - keyframe_stamp).toSec();
-    if(delta_trans > keyframe_delta_trans || delta_angle > keyframe_delta_angle || delta_time > keyframe_delta_time) {
-      keyframe = filtered;
-      registration->setInputTarget(keyframe);
-      
-      prev_pose_gps = pose_gps;
-      keyframe_pose = odom;
-      keyframe_stamp = stamp;
-      prev_trans.setIdentity();
-    }
-
-    return odom;
-    */
-  }
+ 
 
   /**
    * @brief publish odometry
@@ -388,15 +321,17 @@ private:
     // broadcast the transform over tf
     geometry_msgs::TransformStamped odom_trans = matrix2transform(stamp, pose, odom_frame_id, base_frame_id);
     odom_broadcaster.sendTransform(odom_trans);
-
+	
+	Eigen::Matrix4f global_pose = map_in_world * pose ; //global_pose
+	
     // publish the transform
     nav_msgs::Odometry odom;
     odom.header.stamp = stamp;
     odom.header.frame_id = odom_frame_id;
 
-    odom.pose.pose.position.x = pose(0, 3);
-    odom.pose.pose.position.y = pose(1, 3);
-    odom.pose.pose.position.z = pose(2, 3);
+    odom.pose.pose.position.x = global_pose(0, 3);
+    odom.pose.pose.position.y = global_pose(1, 3);
+    odom.pose.pose.position.z = global_pose(2, 3);
     odom.pose.pose.orientation = odom_trans.transform.rotation;
 
     odom.child_frame_id = base_frame_id;
@@ -457,7 +392,7 @@ private:
   bool is_first_frame;
   size_t current_match_index;
   Eigen::Matrix4f first_trans;
-  
+  Eigen::Matrix4f map_in_world;
 };
 
 }

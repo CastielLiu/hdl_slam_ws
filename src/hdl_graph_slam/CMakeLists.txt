@@ -136,3 +136,7 @@ target_link_libraries(location_nodelet ${catkin_LIBRARIES} ${PCL_LIBRARIES} yaml
 add_library(debug_nodelet apps/debug_nodelet.cpp)
 target_link_libraries(debug_nodelet ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 
+add_executable(record_odom_node src/hdl_graph_slam/record_odom.cpp)
+add_dependencies(record_odom_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+target_link_libraries(record_odom_node ${catkin_LIBRARIES} )
+

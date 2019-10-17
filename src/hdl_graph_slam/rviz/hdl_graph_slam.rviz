@@ -30,7 +30,7 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: PointCloud2
+    SyncSource: ""
 Toolbars:
   toolButtonStyle: 2
 Visualization Manager:
@@ -63,12 +63,6 @@ Visualization Manager:
           Value: true
         gps:
           Value: true
-        gps_true:
-          Value: true
-        keyframe:
-          Value: true
-        map:
-          Value: true
         odom:
           Value: true
         velodyne:
@@ -79,17 +73,7 @@ Visualization Manager:
       Show Axes: true
       Show Names: true
       Tree:
-        map:
-          odom:
-            base_link:
-              gps:
-                {}
-              velodyne:
-                {}
-            gps_true:
-              {}
-            keyframe:
-              {}
+        {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -217,10 +201,7 @@ Visualization Manager:
       Marker Topic: /hdl_graph_slam/markers
       Name: MarkerArray
       Namespaces:
-        edges: true
-        imu: false
-        loop_close_radius: true
-        nodes: true
+        {}
       Queue Size: 100
       Value: true
     - Class: rviz/Axes
@@ -255,25 +236,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/ThirdPersonFollower
-      Distance: 60.4640732
+      Distance: 46.318779
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.0599999987
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 3.93003869
-        Y: -22.1719761
-        Z: 3.11080221e-05
+        X: -10.6543674
+        Y: -0.588346481
+        Z: 3.78949917e-05
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.0500000007
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.00999999978
-      Pitch: 1.40979636
+      Pitch: 1.56979632
       Target Frame: <Fixed Frame>
       Value: ThirdPersonFollower (rviz)
-      Yaw: 6.0495615
+      Yaw: 2.28454375
     Saved: ~
 Window Geometry:
   Displays:

@@ -54,6 +54,13 @@
     <param name="keyframes_directory" value="/home/zwei/wendao/map/1_2019-09-27-14-04-43" />
     
   </node>
+  
+  <node pkg="hdl_graph_slam" type="record_odom_node" name="record_odom_node">
+  	 <param name="file_name" value="/home/zwei/wendao/map/1_2019-09-27-14-04-43/odom.txt"/>
+  	 <param name="gps_odom_topic" value="/gps_odom"/>
+  	 <param name="slam_odom_topic" value="/location/odom"/>
+
+  </node>
 
 
 </launch>
