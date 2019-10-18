@@ -260,20 +260,32 @@ private:
   Eigen::Matrix4f locating(const pcl::PointCloud<PointT>::ConstPtr& filtered_points)
   {
   	static Eigen::Matrix4f guess = Eigen::Matrix4f::Identity();
+  	static Eigen::Matrix4f last_pose = Eigen::Matrix4f::Identity();
+  	static Eigen::Matrix4f last_last_pose = Eigen::Matrix4f::Identity();
+  	
   	double now = ros::Time::now().toSec();
   	registration->setInputSource(filtered_points);
   	pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>()); 
 
 	registration->setInputTarget(keyframes[current_match_index]->cloud);
+	
+	auto trans = last_last_pose.inverse() * last_pose; 
+	guess = keyframes[current_match_index]->odom.matrix().inverse().cast<float>() * last_pose * trans;
+	
 	registration->align(*aligned, guess);
 	
 	float score = registration->getFitnessScore();
 	Eigen::Matrix4f transform = registration->getFinalTransformation();
-	//guess = transform;
-	//std::cout << "registration cost: " << ros::Time::now().toSec() - now << std::endl;
-  	std::cout << "current_match_index: " << current_match_index << std::endl;
+	
+  	std::cout << "current_match_index: " << current_match_index << "\t"
+  			  << "registration cost: " << ros::Time::now().toSec() - now  << "\t"
+  			  << "registration score: "<< score 
+			  << std::endl;
+  	
   	
   	auto pose = keyframes[current_match_index]->odom.matrix().cast<float>() * transform;
+  	last_last_pose = last_pose;
+  	last_pose = pose;
   	
   	float max_dis2 = transform(0,3)*transform(0,3) + transform(1,3)*transform(1,3) + transform(2,3)*transform(2,3);
   	for(size_t index=current_match_index+1; true; index++)
