@@ -87,7 +87,7 @@ private:
     distance_near_thresh = private_nh.param<double>("distance_near_thresh", 1.0);
     distance_far_thresh = private_nh.param<double>("distance_far_thresh", 100.0);
 
-    base_link_frame = private_nh.param<std::string>("base_link_frame", "");
+    base_link_frame = private_nh.param<std::string>("base_link_frame", "base_link");
   }
 
   void cloud_callback(pcl::PointCloud<PointT>::ConstPtr src_cloud) {
@@ -96,26 +96,24 @@ private:
       return;
     }
 
-    // if base_link_frame is defined, transform the input cloud to the frame
-    if(!base_link_frame.empty()) 
+    if(!lidar2base_transform) 
     {
       if(!tf_listener.canTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0))) 
       {
         std::cerr << "failed to find transform between " << base_link_frame << " and " << src_cloud->header.frame_id << std::endl;
-      }
-
+      } 
       tf::StampedTransform transform;
       tf_listener.waitForTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0), ros::Duration(2.0));
       tf_listener.lookupTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0), transform);
+      lidar2base_transform = transform;
+	}
+	
+	pcl::PointCloud<PointT>::Ptr transformed(new pcl::PointCloud<PointT>());
+	pcl_ros::transformPointCloud(*src_cloud, *transformed, *lidar2base_transform);
+	transformed->header.frame_id = base_link_frame;
+	transformed->header.stamp = src_cloud->header.stamp;
 
-      pcl::PointCloud<PointT>::Ptr transformed(new pcl::PointCloud<PointT>());
-      pcl_ros::transformPointCloud(*src_cloud, *transformed, transform);
-      transformed->header.frame_id = base_link_frame;
-      transformed->header.stamp = src_cloud->header.stamp;
-      src_cloud = transformed;
-    }
-
-    pcl::PointCloud<PointT>::ConstPtr filtered = distance_filter(src_cloud);
+    pcl::PointCloud<PointT>::ConstPtr filtered = distance_filter(transformed);
     filtered = downsample(filtered);
     //filtered = outlier_removal(filtered);
 
@@ -153,10 +151,14 @@ private:
     pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>());
     filtered->reserve(cloud->size());
 
+    float near_thresh2 = distance_near_thresh*distance_near_thresh;
+	float far_thresh2 = distance_far_thresh*distance_far_thresh;
+	
     std::copy_if(cloud->begin(), cloud->end(), std::back_inserter(filtered->points),
-      [&](const PointT& p) {
-        double d = p.getVector3fMap().norm();
-        return d > distance_near_thresh && d < distance_far_thresh && p.z <2.0;
+      [&](const PointT& p) 
+      {  //dis = p.getVector3fMap().norm();
+        float dis2 = p.x*p.x+p.y*p.y+p.z*p.z;
+        return dis2 > near_thresh2 && dis2 < far_thresh2 && p.z <2.0;
       }
     );
 
@@ -169,25 +171,6 @@ private:
     return filtered;
   }
   
-  pcl::PointCloud<PointT>::ConstPtr xyz_distance_filter(const pcl::PointCloud<PointT>::ConstPtr& cloud) const 
-  {
-    pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>());
-    filtered->reserve(cloud->size());
-
-    std::copy_if(cloud->begin(), cloud->end(), std::back_inserter(filtered->points),
-      [&](const PointT& p) {
-        return  !((fabs(p.x) <2.0 || fabs(p.y) <2.0) || (fabs(p.x) >40.0 || fabs(p.y)>40.0) || p.z >2.0);
-      }
-    );
-
-    filtered->width = filtered->size();
-    filtered->height = 1;
-    filtered->is_dense = false;
-
-    filtered->header = cloud->header;
-
-    return filtered;
-  }
 
 private:
   ros::NodeHandle nh;
@@ -197,6 +180,7 @@ private:
   ros::Publisher points_pub;
 
   tf::TransformListener tf_listener;
+  boost::optional<tf::StampedTransform> lidar2base_transform;
 
   std::string raw_points_topic;
   

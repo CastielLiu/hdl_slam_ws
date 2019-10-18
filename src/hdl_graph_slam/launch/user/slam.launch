@@ -58,7 +58,7 @@
   <node pkg="nodelet" type="nodelet" name="floor_detection_nodelet" args="load hdl_graph_slam/FloorDetectionNodelet $(arg nodelet_manager)" if="$(arg enable_floor_detection)">
     <param name="points_topic" value="/prefiltering/filtered_points"/>
     <param name="tilt_deg" value="0.0" />
-    <param name="sensor_height" value="1.0" />
+    <param name="sensor_height" value="0.81" />
     <param name="height_clip_range" value="0.2" />
     <param name="floor_pts_thresh" value="256" />
     <param name="use_normal_filtering" value="true" />
