@@ -119,22 +119,24 @@ private:
     if(!ros::ok())
       return;
     
-    if(!gps2base)
+    if(!gps_in_base)
     {
       tf::StampedTransform transform;
       tf_listener.waitForTransform("base_link", utm_odom_msg->child_frame_id, ros::Time(0), ros::Duration(2.0));
       tf_listener.lookupTransform("base_link", utm_odom_msg->child_frame_id, ros::Time(0), transform);
-      gps2base = tfTransform2matrix(transform);
+      gps_in_base = tfTransform2matrix(transform);
+      
+      //std::cout << * gps_in_base << std::endl;
     }
     //the odom in the world frame
-    Eigen::Matrix4f worldOdom = odom2matrix(utm_odom_msg)*(*gps2base);
+    Eigen::Matrix4f base_in_world = odom2matrix(utm_odom_msg) * (*gps_in_base);
     
-    if(!world2odom)
-  		world2odom = worldOdom;
-  	pose_gps = world2odom->inverse() * worldOdom;
+    if(!odom_in_world)
+  		odom_in_world = base_in_world;
+  	base_in_odom = odom_in_world->inverse() * base_in_world;
   	
-  	geometry_msgs::TransformStamped odom_trans_gps = matrix2transform(utm_odom_msg->header.stamp, pose_gps, odom_frame_id, "gps_true");
-    gps_odom_broadcaster.sendTransform(odom_trans_gps);
+  	geometry_msgs::TransformStamped base_odom_trans = matrix2transform(utm_odom_msg->header.stamp, base_in_odom, odom_frame_id, "gps_true");
+    base_odom_broadcaster.sendTransform(base_odom_trans);
 
     pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
     pcl::fromROSMsg(*cloud_msg, *cloud);
@@ -180,7 +182,7 @@ private:
   {
     if(!keyframe)
     {
-      prev_pose_gps.setIdentity();
+      prev_base_in_odom.setIdentity();
       prev_trans.setIdentity();
       keyframe_pose.setIdentity();
       keyframe_stamp = stamp;
@@ -193,13 +195,12 @@ private:
     registration->setInputSource(filtered);
 
     pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>()); 
-    pcl::PointCloud<PointT>::Ptr aligned2(new pcl::PointCloud<PointT>());
     
     //use gps generate the Prior pose
-    Eigen::Matrix4f guess = prev_pose_gps.inverse() * pose_gps;
+    Eigen::Matrix4f guess = prev_base_in_odom.inverse() * base_in_odom;
     guess(2,3) = 0; //set z be zero, Poor altitude accuracy of GPS!
    
-    registration->align(*aligned2, guess); //output the registrated pointcloud, must
+    registration->align(*aligned, guess); //output the registrated pointcloud, must
 	
     if(!registration->hasConverged()) {
       NODELET_INFO_STREAM("scan matching has not converged!!");
@@ -234,7 +235,7 @@ private:
       keyframe = filtered;
       registration->setInputTarget(keyframe);
       
-      prev_pose_gps = pose_gps;
+      prev_base_in_odom = base_in_odom;
       keyframe_pose = odom;
       keyframe_stamp = stamp;
       prev_trans.setIdentity();
@@ -284,7 +285,7 @@ private:
   ros::Publisher odom_pub;
   tf::TransformBroadcaster odom_broadcaster;
   tf::TransformBroadcaster keyframe_broadcaster;
-  tf::TransformBroadcaster gps_odom_broadcaster;
+  tf::TransformBroadcaster base_odom_broadcaster;
 
   std::string utm_topic;
   std::string points_topic;
@@ -302,10 +303,10 @@ private:
   double max_acceptable_angle;
 
   // odometry calculation
-  boost::optional<Eigen::Matrix4f> world2odom; // the transform from world to odom
-  boost::optional<Eigen::Matrix4f> gps2base;  // the transform from gps to base
-  Eigen::Matrix4f prev_pose_gps;               // previous pose from gps
-  Eigen::Matrix4f pose_gps;                    // the pose get from gps
+  boost::optional<Eigen::Matrix4f> odom_in_world; // the transform from world to odom
+  boost::optional<Eigen::Matrix4f> gps_in_base;// the transform of gps in base
+  Eigen::Matrix4f prev_base_in_odom;               // previous pose from gps
+  Eigen::Matrix4f base_in_odom;                 
   Eigen::Matrix4f prev_trans;                  // previous estimated transform from keyframe
   Eigen::Matrix4f keyframe_pose;               // keyframe pose
   ros::Time keyframe_stamp;                    // keyframe time
