@@ -16,7 +16,8 @@ public:
 
   Eigen::MatrixXd calc_information_matrix(const pcl::PointCloud<PointT>::ConstPtr& cloud1, const pcl::PointCloud<PointT>::ConstPtr& cloud2, const Eigen::Isometry3d& relpose) const;
 private:
-  double weight(double a, double max_x, double min_y, double max_y, double x) const {
+  double weight(double a, double max_x, double min_y, double max_y, double x) const 
+  {
     double y = (1.0 - std::exp(-a * x)) / (1.0 - std::exp(-a * max_x));
     return min_y + (max_y - min_y) * y;
   }
