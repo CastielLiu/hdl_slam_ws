@@ -69,7 +69,7 @@ namespace hdl_graph_slam {
 class HdlGraphSlamNodelet : public nodelet::Nodelet {
 public:
   typedef pcl::PointXYZI PointT;
-  typedef message_filters::sync_policies::ApproximateTime<nav_msgs::Odometry,nav_msgs::Odometry,sensor_msgs::PointCloud2> MySyncPolicy;
+  typedef message_filters::sync_policies::ApproximateTime<nav_msgs::Odometry,sensor_msgs::PointCloud2> MySyncPolicy1;
   HdlGraphSlamNodelet() {}
   virtual ~HdlGraphSlamNodelet() {}
 
@@ -85,7 +85,7 @@ public:
     odom_frame_id = private_nh.param<std::string>("odom_frame_id", "odom");
     map_cloud_resolution = private_nh.param<double>("map_cloud_resolution", 0.05);
     trans_odom2map.setIdentity();
-	base_frame_id = private_nh.param<std::string>("base_frame_id", "base_link");
+	  base_frame_id = private_nh.param<std::string>("base_frame_id", "base_link");
     max_keyframes_per_update = private_nh.param<int>("max_keyframes_per_update", 10);
 
     //
@@ -99,6 +99,7 @@ public:
     inf_calclator.reset(new InformationMatrixCalculator(private_nh));
     nmea_parser.reset(new NmeaSentenceParser());
 
+    use_gps_odom = private_nh.param<bool>("use_gps_odom", false);
     gps_time_offset = private_nh.param<double>("gps_time_offset", 0.0);
     gps_edge_stddev_xy = private_nh.param<double>("gps_edge_stddev_xy", 10000.0);
     gps_edge_stddev_z = private_nh.param<double>("gps_edge_stddev_z", 10.0);
@@ -111,14 +112,16 @@ public:
     imu_acceleration_edge_stddev = private_nh.param<double>("imu_acceleration_edge_stddev", 3.0);
 
     points_topic = private_nh.param<std::string>("points_topic", "/velodyne_poits");
-	std::string utm_topic = private_nh.param<std::string>("utm_topic","/gps_odom");
+  	std::string utm_topic = private_nh.param<std::string>("utm_topic","/gps_odom");
     // subscribers
-    odom_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, "/scan_matching_odometry/odom", 256));
-    utm_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, utm_topic, 256));
+    if(use_gps_odom)
+      odom_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, utm_topic, 256));
+    else
+      odom_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, "/scan_matching_odometry/odom", 256));
     cloud_sub.reset(new message_filters::Subscriber<sensor_msgs::PointCloud2>(mt_nh, points_topic, 32));
     
-    sync.reset(new message_filters::Synchronizer<MySyncPolicy>(MySyncPolicy(10),*odom_sub,*utm_sub,*cloud_sub));
-	sync->registerCallback(boost::bind(&HdlGraphSlamNodelet::cloud_callback, this, _1, _2,_3));
+    sync1.reset(new message_filters::Synchronizer<MySyncPolicy1>(MySyncPolicy1(10),*odom_sub, *cloud_sub));
+	  sync1->registerCallback(boost::bind(&HdlGraphSlamNodelet::cloud_callback, this, _1, _2));
 	
     imu_sub = nh.subscribe("/gpsimu_driver/imu_data", 1024, &HdlGraphSlamNodelet::imu_callback, this);
     floor_sub = nh.subscribe("/floor_detection/floor_coeffs", 1024, &HdlGraphSlamNodelet::floor_coeffs_callback, this);
@@ -149,73 +152,55 @@ public:
     map_publish_timer = mt_nh.createWallTimer(ros::WallDuration(map_cloud_update_interval), &HdlGraphSlamNodelet::map_points_publish_timer_callback, this);
   }
 private:
+  Eigen::Isometry3d get_odom_by_gps(const nav_msgs::OdometryConstPtr& utm_odom_msg)
+  {
+    static boost::optional<Eigen::Isometry3d> gps_in_base_isometry;
+    if(!gps_in_base_isometry)
+    {
+      tf::StampedTransform tf_gps2base;
+      try
+      {
+        tf_listener.waitForTransform(base_frame_id ,utm_odom_msg->child_frame_id, ros::Time(0), ros::Duration(1.0));
+        tf_listener.lookupTransform(base_frame_id , utm_odom_msg->child_frame_id, ros::Time(0), tf_gps2base);
+      } catch (std::exception& e) 
+      {
+        std::cerr << "failed to find the transform from [" << base_frame_id << "] to [" << utm_odom_msg->child_frame_id << "]!!" << std::endl;
+        return Eigen::Isometry3d::Identity();
+      }
+      tf::transformTFToEigen(tf_gps2base.inverse(), *gps_in_base_isometry);
+    }
+
+    Eigen::Isometry3d gps_in_world_isometry = odom2isometry(utm_odom_msg);
+    auto base_in_world_isometry = gps_in_base_isometry->inverse() * gps_in_world_isometry;
+
+    if(!map_in_world_isometry)
+    {
+      map_in_world_isometry = base_in_world_isometry;
+      //zero_utm = xyz;
+    }
+
+    return map_in_world_isometry->inverse() * base_in_world_isometry;
+  }
+
   /**
    * @brief received point clouds are pushed to #keyframe_queue
    * @param odom_msg
    * @param cloud_msg
    */
   void cloud_callback(const nav_msgs::OdometryConstPtr& odom_msg,
-					  const nav_msgs::OdometryConstPtr& utm_odom_msg,
 					  const sensor_msgs::PointCloud2::ConstPtr& cloud_msg) 
   {
-	geometry_msgs::Transform gps_in_world;
-	gps_in_world.translation.x = utm_odom_msg->pose.pose.position.x;
-	gps_in_world.translation.y = utm_odom_msg->pose.pose.position.y;
-	gps_in_world.translation.z = utm_odom_msg->pose.pose.position.z;
-	
-	gps_in_world.rotation.x = utm_odom_msg->pose.pose.orientation.x;
-	gps_in_world.rotation.y = utm_odom_msg->pose.pose.orientation.y;
-	gps_in_world.rotation.z = utm_odom_msg->pose.pose.orientation.z;
-	gps_in_world.rotation.w = utm_odom_msg->pose.pose.orientation.w;
-	
-	Eigen::Isometry3d gps_in_world_isometry;
-	tf::transformMsgToEigen(gps_in_world, gps_in_world_isometry);
-	
-	if(!gps_in_base_isometry)
-  	{
-  		tf::StampedTransform tf_gps2base;
-		try
-		{
-			tf_listener.waitForTransform(base_frame_id ,utm_odom_msg->child_frame_id, ros::Time(0), ros::Duration(1.0));
-			tf_listener.lookupTransform(base_frame_id , utm_odom_msg->child_frame_id, ros::Time(0), tf_gps2base);
-		} catch (std::exception& e) 
-		{
-			std::cerr << "failed to find the transform from [" << base_frame_id << "] to [" << utm_odom_msg->child_frame_id << "]!!" << std::endl;
-			return ;
-		}
-		tf::transformTFToEigen(tf_gps2base.inverse(), *gps_in_base_isometry);
-	}
-	
-	auto base_in_world_isometry = gps_in_base_isometry->inverse() * gps_in_world_isometry;
-	
-  	if(!map_in_world_isometry)
-  	{
-  		map_in_world_isometry = base_in_world_isometry;
-  		Eigen::Vector3d xyz(gps_in_world.translation.x, gps_in_world.translation.y, gps_in_world.translation.z);
-		zero_utm = xyz;
-  	}
-
-	Eigen::Isometry3d odom = map_in_world_isometry->inverse() * base_in_world_isometry;
-	
-//	Eigen::Isometry3d odom = odom2isometry(odom_msg);  
-
-	//record the odoms from different sensor to contrast 
-/*	static std::ofstream outfile("/home/zwei/wendao/hdl_slam_ws/src/hdl_graph_slam/debug/data.txt");
-	outfile << std::fixed << std::setprecision(3);
-	
-	outfile << odom_msg->pose.pose.position.x <<"\t" << odom_msg->pose.pose.position.y << "\t" << odom_msg->pose.pose.position.z <<"\t";
-	outfile << odom.translation()[0] <<"\t" << odom.translation()[1] << "\t" << odom.translation()[2] <<"\t";
-	outfile << odom_msg->pose.pose.position.x <<"\t" << odom_msg->pose.pose.position.y << "\t" << odom_msg->pose.pose.position.z << std::endl;
-	outfile.flush();
-*/
+    Eigen::Isometry3d odom;
+    if(use_gps_odom)
+      odom = get_odom_by_gps(odom_msg);
+    else
+      odom = odom2isometry(odom_msg);  
 	
     const ros::Time& stamp = cloud_msg->header.stamp;
     
     pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
     pcl::fromROSMsg(*cloud_msg, *cloud);
-    if(base_frame_id.empty()) {
-      base_frame_id = cloud_msg->header.frame_id;
-    }
+    
 		//前后帧变换足够大时，更新累计路程，
 		//并记录当前帧位姿,当前帧为关键帧
     if(!keyframe_updater->update(odom)) {
@@ -980,13 +965,13 @@ private:
     if(map_in_world_isometry) 
     {
       std::ofstream ofs(directory + "/map_in_world.yaml");
-	  YAML::Node data;
-	  auto matrix = map_in_world_isometry->matrix();
-	  std::vector<double> matrixVector(matrix.data(), matrix.data()+matrix.size());
-	  data["matrix"] = matrixVector;
-	
-	  ofs << data ;
-	  ofs.close();
+      YAML::Node data;
+      auto matrix = map_in_world_isometry->matrix();
+      std::vector<double> matrixVector(matrix.data(), matrix.data()+matrix.size());
+      data["matrix"] = matrixVector;
+
+      ofs << data ;
+      ofs.close();
     }
 
     res.success = true;
@@ -1071,9 +1056,9 @@ private:
 
   std::unique_ptr<message_filters::Subscriber<nav_msgs::Odometry>> odom_sub;
   std::unique_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> cloud_sub;
-  std::unique_ptr<message_filters::Subscriber<nav_msgs::Odometry>> utm_sub;
-  std::unique_ptr<message_filters::Synchronizer<MySyncPolicy>> sync;
+  std::unique_ptr<message_filters::Synchronizer<MySyncPolicy1>> sync1;
 
+  bool use_gps_odom;
   ros::Subscriber gps_sub;
   ros::Subscriber nmea_sub;
   ros::Subscriber navsat_sub;
@@ -1095,8 +1080,6 @@ private:
   ros::Publisher map_points_pub;
 
   tf::TransformListener tf_listener;
-  
-  boost::optional<Eigen::Isometry3d> gps_in_base_isometry;
   
   ros::ServiceServer dump_service_server;
   ros::ServiceServer save_map_service_server;

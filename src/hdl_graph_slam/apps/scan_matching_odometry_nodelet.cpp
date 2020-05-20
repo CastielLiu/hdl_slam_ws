@@ -23,11 +23,11 @@
 #include <hdl_graph_slam/ros_utils.hpp>
 #include <hdl_graph_slam/registrations.hpp>
 
-#include<message_filters/time_synchronizer.h>
-#include<message_filters/sync_policies/approximate_time.h>
+#include <message_filters/time_synchronizer.h>
+#include <message_filters/sync_policies/approximate_time.h>
 #include <message_filters/subscriber.h>
 #include <message_filters/time_synchronizer.h>
-#include<geometry_msgs/Transform.h>
+#include <geometry_msgs/Transform.h>
 #include <eigen_conversions/eigen_msg.h>
 
 namespace hdl_graph_slam {
@@ -47,12 +47,16 @@ public:
     private_nh = getPrivateNodeHandle();
 
     initialize_params();
-	
-    utm_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(nh, utm_topic, 256));
-    points_sub.reset(new message_filters::Subscriber<sensor_msgs::PointCloud2>(nh, points_topic, 32));
-    sync.reset(new message_filters::Synchronizer<MySyncPolicy>(MySyncPolicy(10),*utm_sub,*points_sub));
-	sync->registerCallback(boost::bind(&ScanMatchingOdometryNodelet::cloud_callback, this, _1, _2));
-	
+    if(use_gps)
+    {
+      utm_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(nh, utm_topic, 256));
+      points_sub.reset(new message_filters::Subscriber<sensor_msgs::PointCloud2>(nh, points_topic, 32));
+      sync.reset(new message_filters::Synchronizer<MySyncPolicy>(MySyncPolicy(10),*utm_sub,*points_sub));
+      sync->registerCallback(boost::bind(&ScanMatchingOdometryNodelet::utm_cloud_callback, this, _1, _2));
+    }
+	  else
+      pc_sub = nh.subscribe(points_topic, 10, &ScanMatchingOdometryNodelet::cloud_callback, this);
+    
     read_until_pub = nh.advertise<std_msgs::Header>("/scan_matching_odometry/read_until", 32);
     odom_pub = nh.advertise<nav_msgs::Odometry>("/scan_matching_odometry/odom", 32);
   }
@@ -66,6 +70,7 @@ private:
     utm_topic = private_nh.param<std::string>("utm_topic","/gps_odom");
     points_topic = pnh.param<std::string>("points_topic", "/filtered_points");
     odom_frame_id = pnh.param<std::string>("odom_frame_id", "odom");
+    base_frame_id = pnh.param<std::string>("base_frame_id", "base_link");
 
     // The minimum tranlational distance and rotation angle between keyframes.
     // If this value is zero, frames are always compared with the previous frame
@@ -79,7 +84,7 @@ private:
     max_acceptable_angle = pnh.param<double>("max_acceptable_angle", 1.0);
 
     // select a downsample method (VOXELGRID, APPROX_VOXELGRID, NONE)
-    std::string downsample_method = pnh.param<std::string>("downsample_method", "VOXELGRID");
+    std::string downsample_method = pnh.param<std::string>("downsample_method", "NONE");
     double downsample_resolution = pnh.param<double>("downsample_resolution", 0.1);
     if(downsample_method == "VOXELGRID") 
     {
@@ -111,32 +116,39 @@ private:
   }
 
   /**
-   * @brief callback for point clouds
+   * @brief sycn callback for point clouds and gps utm
+   * @param utm_odom_msg  utm odom from gps
    * @param cloud_msg  point cloud msg
    */
-  void cloud_callback( const nav_msgs::OdometryConstPtr& utm_odom_msg, const sensor_msgs::PointCloud2ConstPtr& cloud_msg) 
+  void utm_cloud_callback( const nav_msgs::OdometryConstPtr& utm_odom_msg, const sensor_msgs::PointCloud2ConstPtr& cloud_msg) 
   {
-    if(!ros::ok())
-      return;
+    if(!ros::ok()) return;
     
     if(!gps_in_base)
     {
+      if(!tf_listener.canTransform(base_frame_id, utm_odom_msg->child_frame_id, ros::Time(0))) 
+      {
+        std::cerr << "failed to find transform between " << base_frame_id << " and " << utm_odom_msg->child_frame_id << std::endl;
+        return;
+      } 
+      //监听tf 解算gps在base_link下的位姿
       tf::StampedTransform transform;
-      tf_listener.waitForTransform("base_link", utm_odom_msg->child_frame_id, ros::Time(0), ros::Duration(2.0));
-      tf_listener.lookupTransform("base_link", utm_odom_msg->child_frame_id, ros::Time(0), transform);
+      tf_listener.waitForTransform(base_frame_id, utm_odom_msg->child_frame_id, ros::Time(0), ros::Duration(2.0));
+      tf_listener.lookupTransform(base_frame_id, utm_odom_msg->child_frame_id, ros::Time(0), transform);
       gps_in_base = tfTransform2matrix(transform);
       
       //std::cout << * gps_in_base << std::endl;
     }
-    //the odom in the world frame
-    Eigen::Matrix4f base_in_world = odom2matrix(utm_odom_msg) * (*gps_in_base);
+    //the odom in the world frame [by gps]
+    Eigen::Matrix4f base_in_world_by_gps = odom2matrix(utm_odom_msg) * (*gps_in_base);
     
-    if(!odom_in_world)
-  		odom_in_world = base_in_world;
-  	base_in_odom = odom_in_world->inverse() * base_in_world;
+    if(!odom_in_world_by_gps)
+  		odom_in_world_by_gps = base_in_world_by_gps; //初始时，车辆位置即为odom位置
+    static Eigen::Matrix4f odom_in_world_inversed = odom_in_world_by_gps->inverse();
+  	odom_gps = odom_in_world_inversed * base_in_world_by_gps; //车辆在odom坐标系下的位置
   	
-  	geometry_msgs::TransformStamped base_odom_trans = matrix2transform(utm_odom_msg->header.stamp, base_in_odom, odom_frame_id, "gps_true");
-    base_odom_broadcaster.sendTransform(base_odom_trans);
+  	geometry_msgs::TransformStamped trans = matrix2transform(utm_odom_msg->header.stamp, odom_gps, odom_frame_id, "base_by_gps");
+    odom_by_gps_broadcaster.sendTransform(trans); //tf base->odom 由GPS得到
 
     pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
     pcl::fromROSMsg(*cloud_msg, *cloud);
@@ -144,15 +156,33 @@ private:
     Eigen::Matrix4f pose = matching(cloud_msg->header.stamp, cloud);
     publish_odometry(cloud_msg->header.stamp, cloud_msg->header.frame_id, pose);
 
+    publish_read_until(cloud_msg->header.stamp);
+  }
+
+  void cloud_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_msg) 
+  {
+    if(!ros::ok()) return;
+    
+    pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
+    pcl::fromROSMsg(*cloud_msg, *cloud);
+
+    Eigen::Matrix4f pose = matching(cloud_msg->header.stamp, cloud);
+    publish_odometry(cloud_msg->header.stamp, cloud_msg->header.frame_id, pose);
+
+    publish_read_until(cloud_msg->header.stamp);
+  }
+
+  //发布处理结束时间，根据处理速度发送rosbag ,离线用
+  void publish_read_until(const ros::Time& stamp)
+  {
     // In offline estimation, point clouds until the published time will be supplied
     std_msgs::HeaderPtr read_until(new std_msgs::Header());
     read_until->frame_id = points_topic;
-    read_until->stamp = cloud_msg->header.stamp + ros::Duration(1, 0);
+    read_until->stamp = stamp + ros::Duration(1, 0);
     read_until_pub.publish(read_until);
 
     read_until->frame_id = "/filtered_points";
     read_until_pub.publish(read_until);
-
   }
 
   /**
@@ -182,7 +212,7 @@ private:
   {
     if(!keyframe)
     {
-      prev_base_in_odom.setIdentity();
+      prev_odom_gps.setIdentity();
       prev_trans.setIdentity();
       keyframe_pose.setIdentity();
       keyframe_stamp = stamp;
@@ -193,25 +223,30 @@ private:
 
     auto filtered = downsample(cloud);
     registration->setInputSource(filtered);
+    
+    Eigen::Matrix4f guess;
+    if(use_gps)
+    {
+      guess = prev_odom_gps.inverse() * odom_gps;
+      prev_odom_gps = odom_gps;
+      guess(2,3) = 0; //set z be zero, Poor altitude accuracy of GPS!
+    }
+    else
+      guess = Eigen::Matrix4f::Identity(); 
 
     pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>()); 
-    
-    //use gps generate the Prior pose
-    Eigen::Matrix4f guess = prev_base_in_odom.inverse() * base_in_odom;
-    guess(2,3) = 0; //set z be zero, Poor altitude accuracy of GPS!
-   
-    registration->align(*aligned, guess); //output the registrated pointcloud, must
+    registration->align(*aligned, guess); 
 	
     if(!registration->hasConverged()) {
       NODELET_INFO_STREAM("scan matching has not converged!!");
       NODELET_INFO_STREAM("ignore this frame(" << stamp << ")");
-      return keyframe_pose * prev_trans;
+      return keyframe_pose * prev_trans; 
     }
 
     Eigen::Matrix4f trans = registration->getFinalTransformation();
     Eigen::Matrix4f odom = keyframe_pose * trans;
 
-    if(transform_thresholding) {
+    if(transform_thresholding) { //当前配准得到的位置与上次位置相差过大，认为出错
       Eigen::Matrix4f delta = prev_trans.inverse() * trans;
       double dx = delta.block<3, 1>(0, 3).norm();
       double da = std::acos(Eigen::Quaternionf(delta.block<3, 3>(0, 0)).w());
@@ -231,11 +266,11 @@ private:
     double delta_trans = trans.block<3, 1>(0, 3).norm();
     double delta_angle = std::acos(Eigen::Quaternionf(trans.block<3, 3>(0, 0)).w());
     double delta_time = (stamp - keyframe_stamp).toSec();
-    if(delta_trans > keyframe_delta_trans || delta_angle > keyframe_delta_angle || delta_time > keyframe_delta_time) {
+    if(delta_trans > keyframe_delta_trans || delta_angle > keyframe_delta_angle || delta_time > keyframe_delta_time) 
+    {
       keyframe = filtered;
       registration->setInputTarget(keyframe);
       
-      prev_base_in_odom = base_in_odom;
       keyframe_pose = odom;
       keyframe_stamp = stamp;
       prev_trans.setIdentity();
@@ -252,7 +287,7 @@ private:
   void publish_odometry(const ros::Time& stamp, const std::string& base_frame_id, const Eigen::Matrix4f& pose) {
     // broadcast the transform over tf
     geometry_msgs::TransformStamped odom_trans = matrix2transform(stamp, pose, odom_frame_id, base_frame_id);
-    odom_broadcaster.sendTransform(odom_trans);
+    odom_by_match_broadcaster.sendTransform(odom_trans);
 
     // publish the transform
     nav_msgs::Odometry odom;
@@ -282,14 +317,18 @@ private:
   std::unique_ptr<message_filters::Subscriber<nav_msgs::Odometry>> utm_sub;
   std::unique_ptr<message_filters::Synchronizer<MySyncPolicy>> sync;
 
+  ros::Subscriber pc_sub;
   ros::Publisher odom_pub;
-  tf::TransformBroadcaster odom_broadcaster;
+  tf::TransformBroadcaster odom_by_match_broadcaster;
   tf::TransformBroadcaster keyframe_broadcaster;
-  tf::TransformBroadcaster base_odom_broadcaster;
+  tf::TransformBroadcaster odom_by_gps_broadcaster;
 
+  bool use_gps;
   std::string utm_topic;
   std::string points_topic;
   std::string odom_frame_id;
+  std::string base_frame_id;
+  
   ros::Publisher read_until_pub;
 
   // keyframe parameters
@@ -303,16 +342,15 @@ private:
   double max_acceptable_angle;
 
   // odometry calculation
-  boost::optional<Eigen::Matrix4f> odom_in_world; // the transform from world to odom
+  boost::optional<Eigen::Matrix4f> odom_in_world_by_gps; // the transform from world to odom
   boost::optional<Eigen::Matrix4f> gps_in_base;// the transform of gps in base
-  Eigen::Matrix4f prev_base_in_odom;               // previous pose from gps
-  Eigen::Matrix4f base_in_odom;                 
+  Eigen::Matrix4f prev_odom_gps;               // previous pose from gps
+  Eigen::Matrix4f odom_gps;                 
   Eigen::Matrix4f prev_trans;                  // previous estimated transform from keyframe
   Eigen::Matrix4f keyframe_pose;               // keyframe pose
   ros::Time keyframe_stamp;                    // keyframe time
   pcl::PointCloud<PointT>::ConstPtr keyframe;  // keyframe point cloud
 
-  //
   pcl::Filter<PointT>::Ptr downsample_filter;
   pcl::Registration<PointT, PointT>::Ptr registration;
   

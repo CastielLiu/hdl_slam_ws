@@ -59,6 +59,10 @@ private:
     normal_filter_thresh = private_nh.param<double>("normal_filter_thresh", 20.0); // "non-"verticality check threshold [deg]
 
     points_topic = private_nh.param<std::string>("points_topic", "/velodyne_points");
+    if(tilt_deg == 0)
+      use_tilt_compensate = false;
+    else
+      use_tilt_compensate = true;
   }
 
   /**
@@ -104,27 +108,31 @@ private:
    * @param cloud  input cloud
    * @return detected floor plane coefficients
    */
-  boost::optional<Eigen::Vector4f> detect(const pcl::PointCloud<PointT>::Ptr& cloud) const {
-    // compensate the tilt rotation
-    Eigen::Matrix4f tilt_matrix = Eigen::Matrix4f::Identity();
-    
-    //Eigen::Vector3f::UnitY() Y轴单位向量 [0,1,0].T
-    // Eigen::AngleAxisf(tilt_deg * M_PI / 180.0f, Eigen::Vector3f::UnitY()).toRotationMatrix() 
-    //旋转矩阵(沿向量轴旋转一定的角度)
-    tilt_matrix.topLeftCorner(3, 3) = Eigen::AngleAxisf(tilt_deg * M_PI / 180.0f, Eigen::Vector3f::UnitY()).toRotationMatrix();
-
-    // filtering before RANSAC (height and normal filtering)
+  boost::optional<Eigen::Vector4f> detect(const pcl::PointCloud<PointT>::Ptr& cloud) const 
+  {
     pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>);
-    pcl::transformPointCloud(*cloud, *filtered, tilt_matrix);
+    if(use_tilt_compensate)  //补偿雷达安装倾斜角？点云降采样时已经根据雷达的安装位置将点云转换至base_link,再次补偿无益！
+    {        
+      // compensate the tilt rotation
+      tilt_matrix.setIdentity();
+      
+      //Eigen::Vector3f::UnitY() Y轴单位向量 [0,1,0].T
+      // Eigen::AngleAxisf(tilt_deg * M_PI / 180.0f, Eigen::Vector3f::UnitY()).toRotationMatrix() 
+      //旋转矩阵(沿向量轴旋转一定的角度)
+      tilt_matrix.topLeftCorner(3, 3) = Eigen::AngleAxisf(tilt_deg * M_PI / 180.0f, Eigen::Vector3f::UnitY()).toRotationMatrix();
+    // filtering before RANSAC (height and normal filtering)
+      pcl::transformPointCloud(*cloud, *filtered, tilt_matrix);
+    }
+
     //平面模型 Ax+By+Cz+D = 0
     filtered = plane_clip(filtered, Eigen::Vector4f(0.0f, 0.0f, 1.0f, sensor_height + height_clip_range), false);
     filtered = plane_clip(filtered, Eigen::Vector4f(0.0f, 0.0f, 1.0f, sensor_height - height_clip_range), true);
 
-    if(use_normal_filtering) {
-      filtered = normal_filtering(filtered);
-    }
+    if(use_normal_filtering)  
+      filtered = normal_filtering(filtered); //法线滤波，滤除法线方向超出阈值的点云
 
-    pcl::transformPointCloud(*filtered, *filtered, static_cast<Eigen::Matrix4f>(tilt_matrix.inverse()));
+    if(use_tilt_compensate)
+      pcl::transformPointCloud(*filtered, *filtered, static_cast<Eigen::Matrix4f>(tilt_matrix.inverse()));
 
     // too few points for RANSAC
     if(filtered->size() < floor_pts_thresh) {
@@ -134,7 +142,7 @@ private:
     // RANSAC
     pcl::SampleConsensusModelPlane<PointT>::Ptr model_p(new pcl::SampleConsensusModelPlane<PointT>(filtered));
     pcl::RandomSampleConsensus<PointT> ransac(model_p);
-    ransac.setDistanceThreshold(0.1);     //???????????
+    ransac.setDistanceThreshold(0.1);     //距离阈值，距平面在此范围内的点均认为平面点
     ransac.computeModel();
 
     pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
@@ -145,21 +153,20 @@ private:
       return boost::none;
     }
 
-    // verticality check of the detected floor's normal
-    Eigen::Vector4f reference = tilt_matrix.inverse() * Eigen::Vector4f::UnitZ();
-
     Eigen::VectorXf coeffs;
     ransac.getModelCoefficients(coeffs);
+
+     // make the normal upward
+    //if(coeffs.head<3>().dot(Eigen::Vector3f::UnitZ()) < 0.0f)
+    if(coeffs[2] < 0)
+      coeffs *= -1.0f;
 	
-    double dot = coeffs.head<3>().dot(reference.head<3>());
-    if(std::abs(dot) < std::cos(floor_normal_thresh * M_PI / 180.0)) {
+    static float threshold = std::cos(floor_normal_thresh * M_PI / 180.0);
+    //判断平面法线与z轴夹角，超出阈值则认为非法平面
+    //cos(theta) = v1*v2/(|v1||v2|) => v1[2]
+    if(coeffs[2] < threshold) {
       // the normal is not vertical
       return boost::none;
-    }
-
-    // make the normal upward
-    if(coeffs.head<3>().dot(Eigen::Vector3f::UnitZ()) < 0.0f) {
-      coeffs *= -1.0f;
     }
 
     if(floor_points_pub.getNumSubscribers()) {
@@ -228,7 +235,7 @@ private:
     ne.setSearchMethod(tree);
 
     pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
-    ne.setKSearch(10);   //??????????
+    ne.setKSearch(10);   //邻域点个数，利用邻域点求取平面得到法线向量
     
     //预设法线的方向  因为法线方向有两种可能
     ne.setViewPoint(0.0f, 0.0f, sensor_height);
@@ -237,12 +244,13 @@ private:
     pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>);
     filtered->reserve(cloud->size());
 
+    static float threshold = std::cos(normal_filter_thresh * M_PI / 180.0);
     for (int i = 0; i < cloud->size(); i++) {
     	//.getNormalVector3fMap() 获取法线向量
     	//.normalized() 归一化向量
     	//.dot(Eigen::Vector3f::UnitZ() 取Z的值
       float dot = normals->at(i).getNormalVector3fMap().normalized().dot(Eigen::Vector3f::UnitZ());
-      if (std::abs(dot) > std::cos(normal_filter_thresh * M_PI / 180.0)) {
+      if (std::abs(dot) > threshold) {
         filtered->push_back(cloud->at(i));
       }
     }
@@ -272,6 +280,9 @@ private:
   // floor detection parameters
   // see initialize_params() for the details
   double tilt_deg;
+  bool use_tilt_compensate;
+  Eigen::Matrix4f tilt_matrix;
+
   double sensor_height;
   double height_clip_range;
 

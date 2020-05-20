@@ -1,23 +1,30 @@
 # hdl_graph_slam
 ***hdl_graph_slam*** is an open source ROS package for real-time 6DOF SLAM using a 3D LIDAR. It is based on 3D Graph SLAM with NDT scan matching-based odometry estimation and loop detection. It also supports several graph constraints, such as GPS, IMU acceleration (gravity vector), IMU orientation (magnetic sensor), and floor plane (detected in a point cloud). We have tested this package with Velodyne (HDL32e, VLP16) and RoboSense (16 channels) sensors in indoor and outdoor environments. 
 
-<img src="imgs/hdl_graph_slam.png" width="712pix" />
-
-[video](https://drive.google.com/open?id=0B9f5zFkpn4soSG96Tkt4SFFTbms)
-
-[![Codacy Badge](https://api.codacy.com/project/badge/Grade/1175635f00394e789b457b44690ce72c)](https://app.codacy.com/app/koide3/hdl_graph_slam?utm_source=github.com&utm_medium=referral&utm_content=koide3/hdl_graph_slam&utm_campaign=Badge_Grade_Dashboard) [![Build Status](https://travis-ci.org/koide3/hdl_graph_slam.svg?branch=master)](https://travis-ci.org/koide3/hdl_graph_slam) on kinetic & melodic
 
 ## Nodelets
 ***hdl_graph_slam*** consists of four nodelets.
 
-- *prefiltering_nodelet*
-- *scan_matching_odometry_nodelet*
-- *floor_detection_nodelet*
-- *hdl_graph_slam_nodelet*
+### 1. *prefiltering_nodelet* 
+  雷达点云降采样
+* 如果定义了基坐标baselink_frame,降采样后的点云以基坐标发布，反之，以原坐标发送
+
+### 2. *scan_matching_odometry_nodelet*
+
+### 3. *floor_detection_nodelet*
+#### Subscribed Topics
+* **`/filtered_points`**([sensor_msgs/PointCloud2])   滤波后的点云
+#### Published Topics
+* **`/floor_detection/floor_coeffs`**([hdl_graph_slam::FloorCoeffs])   地面平面参数
+* **`/floor_detection/floor_filtered_points`**([sensor_msgs/PointCloud2])   滤出地面后的点云
+* **`/floor_detection/floor_points`**([sensor_msgs/PointCloud2])    地面点云
+
+
+
+  
+- 4. *hdl_graph_slam_nodelet*
 
 The input point cloud is first downsampled by *prefiltering_nodelet*, and then passed to the next nodelets. While *scan_matching_odometry_nodelet* estimates the sensor pose by iteratively applying a scan matching between consecutive frames (i.e., odometry estimation), *floor_detection_nodelet* detects floor planes by RANSAC. The estimated odometry and the detected floor planes are sent to *hdl_graph_slam*. To compensate the accumulated error of the scan matching, it performs loop detection and optimizes a pose graph which takes various constraints into account.
-
-<img src="imgs/nodelets.png" width="712pix" />
 
 ## Constraints (Edges)
 
