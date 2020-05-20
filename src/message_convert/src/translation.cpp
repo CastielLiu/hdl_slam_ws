@@ -20,6 +20,8 @@
 #include<gps_msgs/Inspvax.h>
 #include<fstream>
 
+//订阅GPS消息并将相对位置和绝对位置保存于本地
+
 bool first = true;
 Eigen::Isometry3d map_in_world_isometry;
 Eigen::Vector3d xyz_zero;
@@ -47,7 +49,7 @@ void utm_callback(const nav_msgs::Odometry::ConstPtr& utm_odom_msg)
 		xyz_zero = xyz;
 	}
 	
-	Eigen::Vector3d transXYZ = map_in_world_isometry.inverse()*xyz;
+	Eigen::Vector3d transXYZ = map_in_world_isometry.inverse()*xyz; //pose in map
 	
 	xyz -= xyz_zero;
 	
