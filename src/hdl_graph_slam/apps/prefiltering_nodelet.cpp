@@ -87,23 +87,49 @@ private:
     base_link_frame = private_nh.param<std::string>("base_link_frame", "");
   }
 
-  void cloud_callback(pcl::PointCloud<PointT>::ConstPtr src_cloud) {
-    if(src_cloud->empty()) {
+  //判断tf变换是否为单位矩阵
+  bool isTfTransformIdentity(const tf::StampedTransform& transform)
+  {
+    auto R = transform.getBasis();
+    auto T = transform.getOrigin();
+
+    if(R == R.getIdentity() && T.getX() ==0 && T.getY() ==0 && T.getZ() ==0)
+      return true;
+    return false;
+  }
+
+  void cloud_callback(pcl::PointCloud<PointT>::ConstPtr src_cloud) 
+  {
+    if(src_cloud->empty()) 
       return;
-    }
 
     // if base_link_frame is defined, transform the input cloud to the frame
-    if(!base_link_frame.empty()) {
+    // 如果定义了基坐标，将点云转换到基坐标
+    if(!base_link_frame.empty()) 
+    {
       if(!tf_listener.canTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0))) {
         std::cerr << "failed to find transform between " << base_link_frame << " and " << src_cloud->header.frame_id << std::endl;
+        return;
       }
 
-      tf::StampedTransform transform;
-      tf_listener.waitForTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0), ros::Duration(2.0));
-      tf_listener.lookupTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0), transform);
+      static bool isGetTransform = false; //是否已经获得坐标转换
+      static tf::StampedTransform transform;
+      if(!isGetTransform)
+      {
+        tf_listener.waitForTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0), ros::Duration(2.0));
+        tf_listener.lookupTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0), transform);
+        isGetTransform = true;
+      }
+
+      static bool isNeedTransform = true; //是否需要点云坐标转换
+      if(isNeedTransform && isTfTransformIdentity(transform))
+        isNeedTransform = false;
 
       pcl::PointCloud<PointT>::Ptr transformed(new pcl::PointCloud<PointT>());
-      pcl_ros::transformPointCloud(*src_cloud, *transformed, transform);
+
+      if(isNeedTransform)
+        pcl_ros::transformPointCloud(*src_cloud, *transformed, transform);
+        
       transformed->header.frame_id = base_link_frame;
       transformed->header.stamp = src_cloud->header.stamp;
       src_cloud = transformed;
@@ -113,6 +139,7 @@ private:
     filtered = downsample(filtered);
     filtered = outlier_removal(filtered);
 
+    filtered->header.stamp = src_cloud->header.stamp;
     points_pub.publish(filtered);
   }
 

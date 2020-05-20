@@ -60,6 +60,11 @@ private:
     normal_filter_thresh = private_nh.param<double>("normal_filter_thresh", 20.0); // "non-"verticality check threshold [deg]
 
     points_topic = private_nh.param<std::string>("points_topic", "/velodyne_points");
+
+    if(tilt_deg == 0)
+      use_tilt_compensate = false;
+    else
+      use_tilt_compensate = true;
   }
 
   /**
@@ -104,27 +109,31 @@ private:
    * @param cloud  input cloud
    * @return detected floor plane coefficients
    */
-  boost::optional<Eigen::Vector4f> detect(const pcl::PointCloud<PointT>::Ptr& cloud) const {
-    // compensate the tilt rotation
-    Eigen::Matrix4f tilt_matrix = Eigen::Matrix4f::Identity();
-    
-    //Eigen::Vector3f::UnitY() Y轴单位向量 [0,1,0].T
-    // Eigen::AngleAxisf(tilt_deg * M_PI / 180.0f, Eigen::Vector3f::UnitY()).toRotationMatrix() 
-    //旋转矩阵(沿向量轴旋转一定的角度)
-    tilt_matrix.topLeftCorner(3, 3) = Eigen::AngleAxisf(tilt_deg * M_PI / 180.0f, Eigen::Vector3f::UnitY()).toRotationMatrix();
-
-    // filtering before RANSAC (height and normal filtering)
+  boost::optional<Eigen::Vector4f> detect(const pcl::PointCloud<PointT>::Ptr& cloud) const 
+  {
     pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>);
-    pcl::transformPointCloud(*cloud, *filtered, tilt_matrix);
+    if(tuse_tilt_compensate)  //补偿雷达安装倾斜角？点云降采样时已经根据雷达的安装位置将点云转换至base_link,再次补偿无益！
+    {               
+      // compensate the tilt rotation 
+      Eigen::Matrix4f tilt_matrix = Eigen::Matrix4f::Identity();
+      
+      //Eigen::Vector3f::UnitY() Y轴单位向量 [0,1,0].T
+      // Eigen::AngleAxisf(tilt_deg * M_PI / 180.0f, Eigen::Vector3f::UnitY()).toRotationMatrix() 
+      //旋转矩阵(沿向量轴旋转一定的角度)
+      tilt_matrix.topLeftCorner(3, 3) = Eigen::AngleAxisf(tilt_deg * M_PI / 180.0f, Eigen::Vector3f::UnitY()).toRotationMatrix();
+
+      // filtering before RANSAC (height and normal filtering)
+      pcl::transformPointCloud(*cloud, *filtered, tilt_matrix);
+    }
     //平面模型 Ax+By+Cz+D = 0
     filtered = plane_clip(filtered, Eigen::Vector4f(0.0f, 0.0f, 1.0f, sensor_height + height_clip_range), false);
     filtered = plane_clip(filtered, Eigen::Vector4f(0.0f, 0.0f, 1.0f, sensor_height - height_clip_range), true);
 
-    if(use_normal_filtering) {
+    if(use_normal_filtering)   //法线滤波，将法线方向超出阈值的点滤除
       filtered = normal_filtering(filtered);
-    }
 
-    pcl::transformPointCloud(*filtered, *filtered, static_cast<Eigen::Matrix4f>(tilt_matrix.inverse()));
+    if(use_tilt_compensate)
+      pcl::transformPointCloud(*filtered, *filtered, static_cast<Eigen::Matrix4f>(tilt_matrix.inverse()));
 
     if(floor_filtered_pub.getNumSubscribers()) {
       filtered->header = cloud->header;
@@ -262,6 +271,7 @@ private:
   // floor detection parameters
   // see initialize_params() for the details
   double tilt_deg;
+  bool use_tilt_compensate;
   double sensor_height;
   double height_clip_range;
 
