@@ -111,6 +111,7 @@ private:
   boost::optional<Eigen::Vector4f> detect(const pcl::PointCloud<PointT>::Ptr& cloud) const 
   {
     pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>);
+    static Eigen::Matrix4f tilt_matrix;
     if(use_tilt_compensate)  //补偿雷达安装倾斜角？点云降采样时已经根据雷达的安装位置将点云转换至base_link,再次补偿无益！
     {        
       // compensate the tilt rotation
@@ -281,7 +282,6 @@ private:
   // see initialize_params() for the details
   double tilt_deg;
   bool use_tilt_compensate;
-  Eigen::Matrix4f tilt_matrix;
 
   double sensor_height;
   double height_clip_range;
