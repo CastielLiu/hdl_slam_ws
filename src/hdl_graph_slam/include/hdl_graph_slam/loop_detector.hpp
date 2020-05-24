@@ -58,8 +58,11 @@ public:
    */
   std::vector<Loop::Ptr> detect(const std::vector<KeyFrame::Ptr>& keyframes, const std::deque<KeyFrame::Ptr>& new_keyframes, hdl_graph_slam::GraphSLAM& graph_slam) {
     std::vector<Loop::Ptr> detected_loops;
-    for(const auto& new_keyframe : new_keyframes) {
+    for(const auto& new_keyframe : new_keyframes) 
+    {
+      //在历史关键帧中查找与新关键帧可能满足回环关系的关键帧
       auto candidates = find_candidates(keyframes, new_keyframe);
+      //在可能的回环关键帧中筛选配准精度最高的帧作为最优回环
       auto loop = matching(candidates, new_keyframe, graph_slam);
       if(loop) {
         detected_loops.push_back(loop);
@@ -76,12 +79,14 @@ public:
 private:
   /**
    * @brief find loop candidates. A detected loop begins at one of #keyframes and ends at #new_keyframe
+   * @brief 查找可能的回环关键帧(两关键帧应具备累计距离相差较大，位移相差较小)
    * @param keyframes      candidate keyframes of loop start
    * @param new_keyframe   loop end keyframe
    * @return loop candidates
    */
   std::vector<KeyFrame::Ptr> find_candidates(const std::vector<KeyFrame::Ptr>& keyframes, const KeyFrame::Ptr& new_keyframe) const {
     // too close to the last registered loop edge
+    // 与上一次注册的回环边距离过近
     if(new_keyframe->accum_distance - last_edge_accum_distance < distance_from_last_edge_thresh) {
       return std::vector<KeyFrame::Ptr>();
     }
@@ -91,6 +96,7 @@ private:
 
     for(const auto& k : keyframes) {
       // traveled distance between keyframes is too small
+      // 新关键帧与旧关键帧累计距离过近！
       if(new_keyframe->accum_distance - k->accum_distance < accum_distance_thresh) {
         continue;
       }
@@ -99,6 +105,7 @@ private:
       const auto& pos2 = new_keyframe->node->estimate().translation();
 
       // estimated distance between keyframes is too small
+      // 比较两关键帧的位移，若两者相距过远，则不作为候选关键帧
       double dist = (pos1.head<2>() - pos2.head<2>()).norm();
       if(dist > distance_thresh) {
         continue;
@@ -117,9 +124,8 @@ private:
    * @param graph_slam           graph slam
    */
   Loop::Ptr matching(const std::vector<KeyFrame::Ptr>& candidate_keyframes, const KeyFrame::Ptr& new_keyframe, hdl_graph_slam::GraphSLAM& graph_slam) {
-    if(candidate_keyframes.empty()) {
+    if(candidate_keyframes.empty()) 
       return nullptr;
-    }
 
     registration->setInputTarget(new_keyframe->cloud);
 
@@ -134,7 +140,8 @@ private:
     auto t1 = ros::Time::now();
 
     pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
-    for(const auto& candidate : candidate_keyframes) {
+    for(const auto& candidate : candidate_keyframes) 
+    {
       registration->setInputSource(candidate->cloud);
       Eigen::Matrix4f guess = (new_keyframe->node->estimate().inverse() * candidate->node->estimate()).matrix().cast<float>();
       guess(2, 3) = 0.0;

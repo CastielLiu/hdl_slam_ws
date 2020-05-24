@@ -17,7 +17,3 @@
 <library path="lib/liblocation_nodelet">
   <class name="hdl_graph_slam/LocationNodelet" type="hdl_graph_slam::LocationNodelet" base_class_type="nodelet::Nodelet" />
 </library>
-
-<library path="lib/libdebug_nodelet">
-  <class name="hdl_graph_slam/DebugNodelet" type="debug::DebugNodelet" base_class_type="nodelet::Nodelet" />
-</library>
