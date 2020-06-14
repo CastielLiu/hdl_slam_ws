@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <launch>
   <!-- arguments -->
-  <arg name="nodelet_manager" default="velodyne_nodelet_manager" />
+  <arg name="nodelet_manager" default="slam_nodelet_manager" />
   <arg name="enable_floor_detection" default="true" />
 
   <node pkg="nodelet" type="nodelet" name="floor_detection_nodelet" args="load hdl_graph_slam/FloorDetectionNodelet $(arg nodelet_manager)" if="$(arg enable_floor_detection)">

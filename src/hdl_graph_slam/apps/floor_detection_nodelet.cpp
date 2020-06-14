@@ -69,12 +69,14 @@ private:
    * @brief callback for point clouds
    * @param cloud_msg  point cloud msg
    */
-  void cloud_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_msg) {
+  void cloud_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_msg) 
+  {
     pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
     pcl::fromROSMsg(*cloud_msg, *cloud);
 
-    if(cloud->empty()) {
-    ROS_INFO("cloud is empty!");
+    if(cloud->empty()) 
+    {
+      ROS_INFO("cloud is empty!");
       return;
     }
 	
@@ -110,24 +112,29 @@ private:
    */
   boost::optional<Eigen::Vector4f> detect(const pcl::PointCloud<PointT>::Ptr& cloud) const 
   {
-    pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>);
-    static Eigen::Matrix4f tilt_matrix;
-    if(use_tilt_compensate)  //补偿雷达安装倾斜角？点云降采样时已经根据雷达的安装位置将点云转换至base_link,再次补偿无益！
-    {        
-      // compensate the tilt rotation
-      tilt_matrix.setIdentity();
-      
-      //Eigen::Vector3f::UnitY() Y轴单位向量 [0,1,0].T
-      // Eigen::AngleAxisf(tilt_deg * M_PI / 180.0f, Eigen::Vector3f::UnitY()).toRotationMatrix() 
-      //旋转矩阵(沿向量轴旋转一定的角度)
-      tilt_matrix.topLeftCorner(3, 3) = Eigen::AngleAxisf(tilt_deg * M_PI / 180.0f, Eigen::Vector3f::UnitY()).toRotationMatrix();
-    // filtering before RANSAC (height and normal filtering)
-      pcl::transformPointCloud(*cloud, *filtered, tilt_matrix);
-    }
+	pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>);
+	static Eigen::Matrix4f tilt_matrix;
+	if(use_tilt_compensate)  //补偿雷达安装倾斜角？点云降采样时已经根据雷达的安装位置将点云转换至base_link,再次补偿无益！
+	{        
+		// compensate the tilt rotation
+		tilt_matrix.setIdentity();
 
-    //平面模型 Ax+By+Cz+D = 0
-    filtered = plane_clip(filtered, Eigen::Vector4f(0.0f, 0.0f, 1.0f, sensor_height + height_clip_range), false);
-    filtered = plane_clip(filtered, Eigen::Vector4f(0.0f, 0.0f, 1.0f, sensor_height - height_clip_range), true);
+		//Eigen::Vector3f::UnitY() Y轴单位向量 [0,1,0].T
+		// Eigen::AngleAxisf(tilt_deg * M_PI / 180.0f, Eigen::Vector3f::UnitY()).toRotationMatrix() 
+		//旋转矩阵(沿向量轴旋转一定的角度)
+		tilt_matrix.topLeftCorner(3, 3) = Eigen::AngleAxisf(tilt_deg * M_PI / 180.0f, Eigen::Vector3f::UnitY()).toRotationMatrix();
+		// filtering before RANSAC (height and normal filtering)
+		pcl::transformPointCloud(*cloud, *filtered, tilt_matrix);
+		//平面模型 Ax+By+Cz+D = 0
+		filtered = plane_clip(filtered, Eigen::Vector4f(0.0f, 0.0f, 1.0f, sensor_height + height_clip_range), false);
+		filtered = plane_clip(filtered, Eigen::Vector4f(0.0f, 0.0f, 1.0f, sensor_height - height_clip_range), true);
+    }
+    else
+    {
+    	//平面模型 Ax+By+Cz+D = 0
+		filtered = plane_clip(cloud, Eigen::Vector4f(0.0f, 0.0f, 1.0f, sensor_height + height_clip_range), false);
+		filtered = plane_clip(filtered, Eigen::Vector4f(0.0f, 0.0f, 1.0f, sensor_height - height_clip_range), true);
+    }
 
     if(use_normal_filtering)  
       filtered = normal_filtering(filtered); //法线滤波，滤除法线方向超出阈值的点云
@@ -228,7 +235,8 @@ private:
    * @param cloud  input cloud
    * @return filtered cloud
    */
-  pcl::PointCloud<PointT>::Ptr normal_filtering(const pcl::PointCloud<PointT>::Ptr& cloud) const {
+  pcl::PointCloud<PointT>::Ptr normal_filtering(const pcl::PointCloud<PointT>::Ptr& cloud) const 
+  {
     pcl::NormalEstimation<PointT, pcl::Normal> ne;
     ne.setInputCloud(cloud);
 

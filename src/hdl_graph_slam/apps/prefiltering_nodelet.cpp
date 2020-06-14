@@ -59,9 +59,10 @@ private:
       }
       std::cout << "downsample: NONE" << std::endl;
     }
-    is_filter_outlier = private_nh.param<bool>("is_filter_outlier", false);
+    use_outlier_filter = private_nh.param<bool>("use_outlier_filter", false);
     std::string outlier_removal_method = private_nh.param<std::string>("outlier_removal_method", "STATISTICAL");
-    if(outlier_removal_method == "STATISTICAL") {
+    if(outlier_removal_method == "STATISTICAL") 
+    {
       int mean_k = private_nh.param<int>("statistical_mean_k", 20);
       double stddev_mul_thresh = private_nh.param<double>("statistical_stddev", 1.0);
       std::cout << "outlier_removal: STATISTICAL " << mean_k << " - " << stddev_mul_thresh << std::endl;
@@ -70,7 +71,9 @@ private:
       sor->setMeanK(mean_k);
       sor->setStddevMulThresh(stddev_mul_thresh);
       outlier_removal_filter = sor;
-    } else if(outlier_removal_method == "RADIUS") {
+    } 
+    else if(outlier_removal_method == "RADIUS") 
+    {
       double radius = private_nh.param<double>("radius_radius", 0.8);
       int min_neighbors = private_nh.param<int>("radius_min_neighbors", 2);
       std::cout << "outlier_removal: RADIUS " << radius << " - " << min_neighbors << std::endl;
@@ -79,13 +82,14 @@ private:
       rad->setRadiusSearch(radius);
       rad->setMinNeighborsInRadius(min_neighbors);
       outlier_removal_filter = rad;
-    } else {
+    } 
+    else 
       std::cout << "outlier_removal: NONE" << std::endl;
-    }
 
     use_distance_filter = private_nh.param<bool>("use_distance_filter", true);
     distance_near_thresh = private_nh.param<double>("distance_near_thresh", 1.0);
     distance_far_thresh = private_nh.param<double>("distance_far_thresh", 100.0);
+    height_thresh = private_nh.param<double>("height_thresh", 2.0);
 
     base_link_frame = private_nh.param<std::string>("base_link_frame", "base_link");
   }
@@ -100,74 +104,81 @@ private:
       return true;
     return false;
   }
-
-  void cloud_callback(pcl::PointCloud<PointT>::ConstPtr src_cloud) {
-  	//double now = ros::Time::now().toSec();
-    if(src_cloud->empty()) {
-      return;
-    }
-
-    static bool isNeedTransform = true; //是否需要点云坐标转换
+    
+    
+  void cloud_callback(const sensor_msgs::PointCloud2ConstPtr& cloud_msg)
+  { 
+	if(cloud_msg->data.size() == 0) 
+		return;
+    
+    pcl::PointCloud<PointT>::Ptr source_cloud(new pcl::PointCloud<PointT>());
+    pcl::fromROSMsg(*cloud_msg, *source_cloud);
+    
+    pcl::PointCloud<PointT>::Ptr filtered = distance_filter(source_cloud);
+    filtered = downsample(filtered);
+    
+    //std::cout << "pc size after filter:" << filtered->size() << std::endl;
+    if(use_outlier_filter)
+		filtered = outlier_removal(filtered);
+		
+    
+    /*
     if(!lidar2base_transform) 
     {
-      if(!tf_listener.canTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0))) 
+      if(!tf_listener.canTransform(base_link_frame, cloud_msg->header.frame_id, ros::Time(0))) 
       {
-        std::cerr << "failed to find transform between " << base_link_frame << " and " << src_cloud->header.frame_id << std::endl;
+        std::cerr << "failed to find transform between " << base_link_frame << " and " << cloud_msg->header.frame_id << std::endl;
         return;
       } 
       tf::StampedTransform transform;
-      tf_listener.waitForTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0), ros::Duration(2.0));
-      tf_listener.lookupTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0), transform);
+      tf_listener.waitForTransform(base_link_frame, cloud_msg->header.frame_id, ros::Time(0), ros::Duration(2.0));
+      tf_listener.lookupTransform(base_link_frame, cloud_msg->header.frame_id, ros::Time(0), transform);
       lidar2base_transform = transform;
-      if(isTfTransformIdentity(transform))
-        isNeedTransform = false;
     }
     
-    if(isNeedTransform)
-    {
-      pcl::PointCloud<PointT>::Ptr transformed(new pcl::PointCloud<PointT>());
-      pcl_ros::transformPointCloud(*src_cloud, *transformed, *lidar2base_transform);
-      transformed->header.frame_id = base_link_frame;
-      transformed->header.stamp = src_cloud->header.stamp;
-      src_cloud = transformed;
-    }
+    if(lidar2base_transform)
+		pcl_ros::transformPointCloud(*source_cloud, *source_cloud, *lidar2base_transform);
+		
+    */
 
-    pcl::PointCloud<PointT>::ConstPtr filtered = distance_filter(src_cloud);
-    filtered = downsample(filtered);
-    if(is_filter_outlier)
-      filtered = outlier_removal(filtered);
-
-    points_pub.publish(filtered);
-    //ROS_INFO_STREAM(ros::this_node::getName() << ": cost " << ros::Time::now().toSec()-now);
+    
+	
+	
+	
+	sensor_msgs::PointCloud2 out_cloud;
+    pcl::toROSMsg(*filtered, out_cloud);
+    out_cloud.header.stamp = cloud_msg->header.stamp;
+    out_cloud.header.frame_id = base_link_frame;
+    points_pub.publish(out_cloud);
   }
 
-  pcl::PointCloud<PointT>::ConstPtr downsample(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
-    if(!downsample_filter) {
+  pcl::PointCloud<PointT>::Ptr downsample(pcl::PointCloud<PointT>::Ptr cloud) const 
+  {
+    if(!downsample_filter) 
       return cloud;
-    }
 
     pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>());
     downsample_filter->setInputCloud(cloud);
     downsample_filter->filter(*filtered);
-    filtered->header = cloud->header;
 
     return filtered;
   }
 
-  pcl::PointCloud<PointT>::ConstPtr outlier_removal(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
-    if(!outlier_removal_filter) {
+  pcl::PointCloud<PointT>::Ptr outlier_removal(pcl::PointCloud<PointT>::Ptr cloud) const 
+  {
+    if(!outlier_removal_filter) 
       return cloud;
-    }
 
     pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>());
     outlier_removal_filter->setInputCloud(cloud);
     outlier_removal_filter->filter(*filtered);
-    filtered->header = cloud->header;
 
     return filtered;
   }
-
-  pcl::PointCloud<PointT>::ConstPtr distance_filter(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
+  
+  //遠近高低濾波
+  pcl::PointCloud<PointT>::Ptr distance_filter(const pcl::PointCloud<PointT>::ConstPtr cloud) const 
+  {
     pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>());
     filtered->reserve(cloud->size());
 
@@ -178,15 +189,12 @@ private:
       [&](const PointT& p) 
       {  //dis = p.getVector3fMap().norm();
         float dis2 = p.x*p.x+p.y*p.y+p.z*p.z;
-        return dis2 > near_thresh2 && dis2 < far_thresh2 && p.z <2.0;
-      }
-    );
+        return dis2 > near_thresh2 && dis2 < far_thresh2 && p.z < height_thresh ;
+      });
 
     filtered->width = filtered->size();
     filtered->height = 1;
     filtered->is_dense = false;
-
-    filtered->header = cloud->header;
 
     return filtered;
   }
@@ -209,12 +217,12 @@ private:
   bool use_distance_filter;
   double distance_near_thresh;
   double distance_far_thresh;
+  double height_thresh;
 
   pcl::Filter<PointT>::Ptr downsample_filter;
   pcl::Filter<PointT>::Ptr outlier_removal_filter;
 
-  bool is_filter_outlier;
-
+  bool use_outlier_filter;
 };
 
 }

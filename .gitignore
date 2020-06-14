@@ -6,3 +6,4 @@ el_isolated/
 .vscode/
 .ycm_*
 .catkin_workspace
+*.pcd

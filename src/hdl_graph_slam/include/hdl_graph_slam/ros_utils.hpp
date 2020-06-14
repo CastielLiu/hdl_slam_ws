@@ -55,6 +55,23 @@ static Eigen::Isometry3d odom2isometry(const nav_msgs::OdometryConstPtr& odom_ms
   return isometry;
 }
 
+static Eigen::Isometry3d odom2isometry(const nav_msgs::Odometry odom) 
+{
+  const auto& orientation = odom.pose.pose.orientation;
+  const auto& position = odom.pose.pose.position;
+
+  Eigen::Quaterniond quat;
+  quat.w() = orientation.w;
+  quat.x() = orientation.x;
+  quat.y() = orientation.y;
+  quat.z() = orientation.z;
+//欧氏变换矩阵 // 虽然称为3d，实质上是4＊4的矩阵
+  Eigen::Isometry3d isometry = Eigen::Isometry3d::Identity();
+  isometry.linear() = quat.toRotationMatrix(); //四元数转旋转矩阵
+  isometry.translation() = Eigen::Vector3d(position.x, position.y, position.z);
+  return isometry;
+}
+
 
 static Eigen::Matrix4f odom2matrix(const nav_msgs::OdometryConstPtr& odom_msg)
 {

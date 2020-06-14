@@ -113,10 +113,10 @@ public:
     imu_acceleration_edge_stddev = private_nh.param<double>("imu_acceleration_edge_stddev", 3.0);
 
     points_topic = private_nh.param<std::string>("points_topic", "/velodyne_poits");
-  	std::string utm_topic = private_nh.param<std::string>("utm_topic","/gps_odom");
+  	std::string gps_odom_topic = private_nh.param<std::string>("gps_odom_topic","/gps_odom");
     // subscribers
     if(use_gps_odom)
-      odom_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, utm_topic, 256));
+      odom_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, gps_odom_topic, 256));
     else
       odom_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, "/scan_matching_odometry/odom", 256));
     cloud_sub.reset(new message_filters::Subscriber<sensor_msgs::PointCloud2>(mt_nh, points_topic, 32));
@@ -138,6 +138,7 @@ public:
     markers_pub = mt_nh.advertise<visualization_msgs::MarkerArray>("/hdl_graph_slam/markers", 16);
     odom2map_pub = mt_nh.advertise<geometry_msgs::TransformStamped>("/hdl_graph_slam/odom2pub", 16);
     map_points_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/hdl_graph_slam/map_points", 1);
+    transed_points_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/hdl_graph_slam/aligned_points", 1);
     read_until_pub = mt_nh.advertise<std_msgs::Header>("/hdl_graph_slam/read_until", 32);
 
     dump_service_server = mt_nh.advertiseService("/hdl_graph_slam/dump", &HdlGraphSlamNodelet::dump_service, this);
@@ -155,24 +156,38 @@ public:
 private:
   Eigen::Isometry3d get_odom_by_gps(const nav_msgs::OdometryConstPtr& utm_odom_msg)
   {
-    static boost::optional<Eigen::Isometry3d> gps_in_base_isometry;
-    if(!gps_in_base_isometry)
+    nav_msgs::Odometry odom = *utm_odom_msg;
+    odom.pose.pose.position.z = 0;
+    
+	static bool tf_ok = false;
+    static Eigen::Isometry3d gps_in_base_isometry, gps_to_base;
+    if(!tf_ok)
     {
+      std::string gps_frame_id = utm_odom_msg->child_frame_id;
+      if(gps_frame_id.empty())
+      {
+		gps_frame_id = "gps";
+		ROS_INFO("gps odom child frame id is empty, set to gps");
+      }
+      
       tf::StampedTransform tf_gps2base;
       try
       {
-        tf_listener.waitForTransform(base_frame_id ,utm_odom_msg->child_frame_id, ros::Time(0), ros::Duration(1.0));
-        tf_listener.lookupTransform(base_frame_id , utm_odom_msg->child_frame_id, ros::Time(0), tf_gps2base);
-      } catch (std::exception& e) 
+        tf_listener.waitForTransform(base_frame_id ,gps_frame_id, ros::Time(0), ros::Duration(1.0));
+        tf_listener.lookupTransform(base_frame_id , gps_frame_id, ros::Time(0), tf_gps2base);
+      } 
+      catch (std::exception& e) 
       {
         std::cerr << "failed to find the transform from [" << base_frame_id << "] to [" << utm_odom_msg->child_frame_id << "]!!" << std::endl;
         return Eigen::Isometry3d::Identity();
       }
-      tf::transformTFToEigen(tf_gps2base.inverse(), *gps_in_base_isometry);
+      tf::transformTFToEigen(tf_gps2base.inverse(), gps_in_base_isometry);
+      tf::transformTFToEigen(tf_gps2base, gps_to_base);
+      tf_ok = true;
     }
 
-    Eigen::Isometry3d gps_in_world_isometry = odom2isometry(utm_odom_msg);
-    auto base_in_world_isometry = gps_in_base_isometry->inverse() * gps_in_world_isometry;
+    Eigen::Isometry3d gps_in_world_isometry = odom2isometry(odom);
+    auto base_in_world_isometry = gps_to_base * gps_in_world_isometry;
 
     if(!map_in_world_isometry)
     {
@@ -192,17 +207,31 @@ private:
   void cloud_callback(const nav_msgs::OdometryConstPtr& odom_msg,
 					  const sensor_msgs::PointCloud2::ConstPtr& cloud_msg) 
   {
+	ROS_INFO("slam received a pointcloud");
+
     Eigen::Isometry3d odom;
     if(use_gps_odom)
       odom = get_odom_by_gps(odom_msg);
     else
-      odom = odom2isometry(odom_msg);  
-	
+      odom = odom2isometry(odom_msg);
+      
     const ros::Time& stamp = cloud_msg->header.stamp;
-    
     pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
     pcl::fromROSMsg(*cloud_msg, *cloud);
     
+    if(transed_points_pub.getNumSubscribers())
+    {
+		// 发布转换到odom坐标系下的点云
+		Eigen::Matrix4f tran_ = odom.matrix().cast<float>();
+		pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
+		pcl::transformPointCloud(*cloud, *aligned, tran_);
+		sensor_msgs::PointCloud2Ptr cloud_msg(new sensor_msgs::PointCloud2());
+		cloud_msg->header.stamp = cloud_msg->header.stamp;
+		cloud_msg->header.frame_id = odom_frame_id;
+		pcl::toROSMsg(*aligned, *cloud_msg);
+		transed_points_pub.publish(aligned);
+    }
+
 		//前后帧变换足够大时，更新累计路程，
 		//并记录当前帧位姿,当前帧为关键帧
     if(!keyframe_updater->update(odom))  //与上一关键帧位置对比，变换是否超出阈值
@@ -1093,6 +1122,7 @@ private:
   ros::Subscriber floor_sub;
 
   ros::Publisher markers_pub;
+  ros::Publisher transed_points_pub;
 
   std::string map_frame_id;
   std::string odom_frame_id;
