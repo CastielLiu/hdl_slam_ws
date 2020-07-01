@@ -47,14 +47,14 @@ public:
     private_nh = getPrivateNodeHandle();
 
     initialize_params();
-    if(use_gps)
+    if(use_gps_odom)
     {
       utm_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(nh, utm_topic, 256));
       points_sub.reset(new message_filters::Subscriber<sensor_msgs::PointCloud2>(nh, points_topic, 32));
       sync.reset(new message_filters::Synchronizer<MySyncPolicy>(MySyncPolicy(10),*utm_sub,*points_sub));
       sync->registerCallback(boost::bind(&ScanMatchingOdometryNodelet::utm_cloud_callback, this, _1, _2));
     }
-	  else
+    else
       pc_sub = nh.subscribe(points_topic, 10, &ScanMatchingOdometryNodelet::cloud_callback, this);
     
     read_until_pub = nh.advertise<std_msgs::Header>("/scan_matching_odometry/read_until", 32);
@@ -71,6 +71,7 @@ private:
     points_topic = pnh.param<std::string>("points_topic", "/filtered_points");
     odom_frame_id = pnh.param<std::string>("odom_frame_id", "odom");
     base_frame_id = pnh.param<std::string>("base_frame_id", "base_link");
+    use_gps_odom = pnh.param<bool>("use_gps_odom",false);
 
     // The minimum tranlational distance and rotation angle between keyframes.
     // If this value is zero, frames are always compared with the previous frame
@@ -225,7 +226,7 @@ private:
     registration->setInputSource(filtered);
     
     Eigen::Matrix4f guess;
-    if(use_gps)
+    if(use_gps_odom)
     {
       guess = prev_odom_gps.inverse() * odom_gps;
       prev_odom_gps = odom_gps;
@@ -323,7 +324,7 @@ private:
   tf::TransformBroadcaster keyframe_broadcaster;
   tf::TransformBroadcaster odom_by_gps_broadcaster;
 
-  bool use_gps;
+  bool use_gps_odom;
   std::string utm_topic;
   std::string points_topic;
   std::string odom_frame_id;

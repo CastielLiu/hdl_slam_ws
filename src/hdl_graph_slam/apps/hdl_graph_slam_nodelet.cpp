@@ -19,6 +19,8 @@
 #include <message_filters/subscriber.h>
 #include <message_filters/time_synchronizer.h>
 #include <tf_conversions/tf_eigen.h>
+
+#include <tf/transform_broadcaster.h>
 #include <tf/transform_listener.h>
 
 #include <std_msgs/Time.h>
@@ -220,7 +222,11 @@ private:
 
     Eigen::Isometry3d odom;
     if(use_gps_odom)
-      odom = get_odom_by_gps(odom_msg);
+    {
+        odom = get_odom_by_gps(odom_msg);
+        geometry_msgs::TransformStamped tf_odom = matrix2transform(odom_msg->header.stamp, odom, odom_frame_id, base_frame_id);
+        odom_by_gps_broadcaster.sendTransform(tf_odom);
+    }
     else
       odom = odom2isometry(odom_msg);
       
@@ -1145,6 +1151,7 @@ private:
   ros::Publisher map_points_pub;
 
   tf::TransformListener tf_listener;
+  tf::TransformBroadcaster odom_by_gps_broadcaster;
   
   ros::ServiceServer dump_service_server;
   ros::ServiceServer save_map_service_server;
