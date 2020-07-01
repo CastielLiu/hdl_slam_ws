@@ -154,20 +154,26 @@ public:
     map_publish_timer = mt_nh.createWallTimer(ros::WallDuration(map_cloud_update_interval), &HdlGraphSlamNodelet::map_points_publish_timer_callback, this);
   }
 private:
+  /*@brief 将gps全局定位信息转换为车辆相对于地图的局部定位信息
+   *@bried 期望输出base_link相对于odom的坐标.
+   *@brief 实际输出为base_link相对于map的坐标
+   *@brief 当odom与map重合时,结果正确,当不重合时可能出现错误！
+   */
   Eigen::Isometry3d get_odom_by_gps(const nav_msgs::OdometryConstPtr& utm_odom_msg)
   {
     nav_msgs::Odometry odom = *utm_odom_msg;
     odom.pose.pose.position.z = 0;
     
 	static bool tf_ok = false;
-    static Eigen::Isometry3d gps_in_base_isometry, gps_to_base;
+    static Eigen::Isometry3d gps_in_base, gps_to_base;
     if(!tf_ok)
     {
+      //获取gps与base_link的坐标变换
       std::string gps_frame_id = utm_odom_msg->child_frame_id;
       if(gps_frame_id.empty())
       {
-		gps_frame_id = "gps";
-		ROS_INFO("gps odom child frame id is empty, set to gps");
+          gps_frame_id = "gps";
+          ROS_INFO("gps odom child frame id is empty, set to gps");
       }
       
       tf::StampedTransform tf_gps2base;
@@ -181,21 +187,24 @@ private:
         std::cerr << "failed to find the transform from [" << base_frame_id << "] to [" << utm_odom_msg->child_frame_id << "]!!" << std::endl;
         return Eigen::Isometry3d::Identity();
       }
-      tf::transformTFToEigen(tf_gps2base.inverse(), gps_in_base_isometry);
+      tf::transformTFToEigen(tf_gps2base.inverse(), gps_in_base);
       tf::transformTFToEigen(tf_gps2base, gps_to_base);
       tf_ok = true;
     }
-
-    Eigen::Isometry3d gps_in_world_isometry = odom2isometry(odom);
-    auto base_in_world_isometry = gps_to_base * gps_in_world_isometry;
-
-    if(!map_in_world_isometry)
+    //由gps定位点与gps在base_link的安装位置,求base_link的大地坐标
+    Eigen::Isometry3d gps_in_world = odom2isometry(odom);
+    Eigen::Isometry3d base_in_world = gps_to_base * gps_in_world;
+    
+    //地图原点在大地坐标系下的位置
+    if(!map_in_world)
     {
-      map_in_world_isometry = base_in_world_isometry;
+      map_in_world = base_in_world;
       //zero_utm = xyz;
     }
-
-    return map_in_world_isometry->inverse() * base_in_world_isometry;
+    static Eigen::Isometry3d map_in_world_reverse = map_in_world->inverse();
+    
+    //base_in_map -> local_odom
+    return map_in_world_reverse * base_in_world;
   }
 
   /**
@@ -1017,11 +1026,11 @@ private:
       keyframes[i]->dump(sst.str());
     }
 
-    if(map_in_world_isometry) 
+    if(map_in_world) 
     {
       std::ofstream ofs(directory + "/map_in_world.yaml");
       YAML::Node data;
-      auto matrix = map_in_world_isometry->matrix();
+      auto matrix = map_in_world->matrix();
       std::vector<double> matrixVector(matrix.data(), matrix.data()+matrix.size());
       data["matrix"] = matrixVector;
 
@@ -1150,7 +1159,7 @@ private:
   double gps_time_offset;
   double gps_edge_stddev_xy;
   double gps_edge_stddev_z;
-  boost::optional<Eigen::Isometry3d> map_in_world_isometry;
+  boost::optional<Eigen::Isometry3d> map_in_world;
   boost::optional<Eigen::Vector3d> zero_utm;
   
   std::mutex gps_queue_mutex;
