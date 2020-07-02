@@ -66,6 +66,15 @@
 #include<fstream>
 #include <yaml.h>
 
+/*
+rosservice call /hdl_graph_slam/save_map "utm: false
+resolution: 0.0
+detination: '/home/zwei/wendao/slam/hdl_slam_ws/map.pcd'"
+
+*/
+
+#define __NAME__ "mapping_node"
+
 namespace hdl_graph_slam {
 
 class HdlGraphSlamNodelet : public nodelet::Nodelet {
@@ -102,11 +111,21 @@ public:
     nmea_parser.reset(new NmeaSentenceParser());
 
     //是否使用gps提供的odom，如果不使用，则使用点云配置所得odom
-    use_gps_odom = private_nh.param<bool>("use_gps_odom", false);
+    use_gps_instead_lidar_odom = private_nh.param<bool>("use_gps_instead_lidar_odom", false);
+    
+    //gps
     gps_time_offset = private_nh.param<double>("gps_time_offset", 0.0);
     gps_edge_stddev_xy = private_nh.param<double>("gps_edge_stddev_xy", 10000.0);
     gps_edge_stddev_z = private_nh.param<double>("gps_edge_stddev_z", 10.0);
+    
+    //floor
     floor_edge_stddev = private_nh.param<double>("floor_edge_stddev", 10.0);
+    
+    //utm
+    utm_time_offset = private_nh.param<double>("utm_time_offset", 0.0);
+    utm_edge_stddev_xy = private_nh.param<double>("utm_edge_stddev_xy", 10000.0);
+    utm_edge_stddev_z = private_nh.param<double>("utm_edge_stddev_z", 10.0);
+
 
     imu_time_offset = private_nh.param<double>("imu_time_offset", 0.0);
     enable_imu_orientation = private_nh.param<bool>("enable_imu_orientation", false);
@@ -117,7 +136,7 @@ public:
     points_topic = private_nh.param<std::string>("points_topic", "/velodyne_poits");
   	std::string gps_odom_topic = private_nh.param<std::string>("gps_odom_topic","/gps_odom");
     // subscribers
-    if(use_gps_odom)
+    if(use_gps_instead_lidar_odom)
       odom_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, gps_odom_topic, 256));
     else
       odom_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, "/scan_matching_odometry/odom", 256));
@@ -129,11 +148,17 @@ public:
     imu_sub = nh.subscribe("/gpsimu_driver/imu_data", 1024, &HdlGraphSlamNodelet::imu_callback, this);
     floor_sub = nh.subscribe("/floor_detection/floor_coeffs", 1024, &HdlGraphSlamNodelet::floor_coeffs_callback, this);
 
-    if(private_nh.param<bool>("enable_gps", false)) 
+    if(private_nh.param<bool>("enable_gps", false))
     {
       gps_sub = mt_nh.subscribe("/gps/geopoint", 1024, &HdlGraphSlamNodelet::gps_callback, this);
       nmea_sub = mt_nh.subscribe("/gpsimu_driver/nmea_sentence", 1024, &HdlGraphSlamNodelet::nmea_callback, this);
       navsat_sub = mt_nh.subscribe("/gps/navsat", 1024, &HdlGraphSlamNodelet::navsat_callback, this);
+    }
+    
+    if(!use_gps_instead_lidar_odom && private_nh.param<bool>("enable_utm",false))
+    {
+      std::string utm_topic = private_nh.param<std::string>("utm_topic","/gps_odom");
+      utm_sub = mt_nh.subscribe(utm_topic,1024,&HdlGraphSlamNodelet::utm_callback, this);
     }
 
     // publishers
@@ -166,7 +191,7 @@ private:
     nav_msgs::Odometry odom = *utm_odom_msg;
     odom.pose.pose.position.z = 0;
     
-	static bool tf_ok = false;
+    static bool tf_ok = false;
     static Eigen::Isometry3d gps_in_base, gps_to_base;
     if(!tf_ok)
     {
@@ -199,10 +224,8 @@ private:
     
     //地图原点在大地坐标系下的位置
     if(!map_in_world)
-    {
       map_in_world = base_in_world;
-      //zero_utm = xyz;
-    }
+      
     static Eigen::Isometry3d map_in_world_reverse = map_in_world->inverse();
     
     //base_in_map -> local_odom
@@ -221,7 +244,7 @@ private:
 	ROS_INFO("slam received a pointcloud");
 
     Eigen::Isometry3d odom;
-    if(use_gps_odom)
+    if(use_gps_instead_lidar_odom)
     {
         odom = get_odom_by_gps(odom_msg);
         geometry_msgs::TransformStamped tf_odom = matrix2transform(odom_msg->header.stamp, odom, odom_frame_id, base_frame_id);
@@ -252,7 +275,7 @@ private:
     if(!keyframe_updater->update(odom))  //与上一关键帧位置对比，变换是否超出阈值
     {
       std::lock_guard<std::mutex> lock(keyframe_queue_mutex);
-      if(keyframe_queue.empty()) 
+      if(keyframe_queue.empty() && read_until_pub.getNumSubscribers()) 
       {
         std_msgs::Header read_until;
         read_until.stamp = stamp + ros::Duration(10, 0);
@@ -293,19 +316,21 @@ private:
       return false;
 
     trans_odom2map_mutex.lock();
-    Eigen::Isometry3d odom2map(trans_odom2map.cast<double>()); //初始为I
+    //odom2map 初始为I(即两者重合),后经优化器更新，反映里程计误差
+    Eigen::Isometry3d odom2map(trans_odom2map.cast<double>()); 
     trans_odom2map_mutex.unlock();
 
     int num_processed = 0;
-    for(int i=0; i<std::min<int>(keyframe_queue.size(), max_keyframes_per_update); i++) 
+    for(int i=0; i<std::min<int>(keyframe_queue.size(), max_keyframes_per_update); ++i) 
     {
       num_processed = i;
 
       const auto& keyframe = keyframe_queue[i];
       // new_keyframes will be tested later for loop closure
+      // new_keyframes 将被用于回环检测
       new_keyframes.push_back(keyframe);
 
-      // add pose node
+      // add pose node 添加姿态节点
       Eigen::Isometry3d odom = odom2map * keyframe->odom;
       keyframe->node = graph_slam->add_se3_node(odom);
       keyframe_hash[keyframe->stamp] = keyframe;
@@ -319,13 +344,14 @@ private:
         }
       }
 
-      if(i==0 && keyframes.empty()) //i为0且keyframes为空时，则不存在上一关键帧
+      if(i==0 && keyframes.empty()) //i为0且keyframes为空时，不存在上一关键帧
         continue;
 
       // add edge between consecutive keyframes
-      const auto& prev_keyframe = i == 0 ? keyframes.back() : keyframe_queue[i - 1];
-
+      const auto& prev_keyframe = (i==0) ? keyframes.back():keyframe_queue[i - 1];
+      //与上一关键帧相对当前帧的变换
       Eigen::Isometry3d relative_pose = keyframe->odom.inverse() * prev_keyframe->odom;
+      // 计算信息矩阵
       Eigen::MatrixXd information = inf_calclator->calc_information_matrix(prev_keyframe->cloud, keyframe->cloud, relative_pose);
       auto edge = graph_slam->add_se3_edge(keyframe->node, prev_keyframe->node, relative_pose, information);
       static std::string robust_kernel = private_nh.param<std::string>("odometry_edge_robust_kernel", "NONE");
@@ -383,34 +409,35 @@ private:
    * @brief
    * @return
    */
-  bool flush_gps_queue() {
+  bool flush_gps_queue() 
+  {
     std::lock_guard<std::mutex> lock(gps_queue_mutex);
 
-    if(keyframes.empty() || gps_queue.empty()) {
+    if(keyframes.empty() || gps_queue.empty())
       return false;
-    }
 
     bool updated = false;
     auto gps_cursor = gps_queue.begin();
 
-    for(auto& keyframe : keyframes) {
-      if(keyframe->stamp > gps_queue.back()->header.stamp) {
+    for(auto& keyframe : keyframes) 
+    {
+      if(keyframe->stamp > gps_queue.back()->header.stamp)
         break;
-      }
-
-      if(keyframe->stamp < (*gps_cursor)->header.stamp || keyframe->utm_coord) {
+      
+      //1.keyframe时间比第一帧gps时间还早
+      //2.当前keyframe 的 utm_coord 已经被赋值
+      if(keyframe->stamp < (*gps_cursor)->header.stamp || keyframe->utm_coord)
         continue;
-      }
 
       // find the gps data which is closest to the keyframe
       // 查找与关键帧时间最近的gps数据
       auto closest_gps = gps_cursor;
-      for(auto gps = gps_cursor; gps != gps_queue.end(); gps++) {
+      for(auto gps = gps_cursor; gps != gps_queue.end(); ++gps) 
+      {
         auto dt = ((*closest_gps)->header.stamp - keyframe->stamp).toSec();
         auto dt2 = ((*gps)->header.stamp - keyframe->stamp).toSec();
-        if(std::abs(dt) < std::abs(dt2)) {
+        if(std::abs(dt) < std::abs(dt2))
           break;
-        }
 
         closest_gps = gps;
       }
@@ -418,44 +445,48 @@ private:
       // if the time residual between the gps and keyframe is too large, skip it
       // 如果GPS数据时间与关键帧时间相差太大则略去
       gps_cursor = closest_gps;
-      if(0.2 < std::abs(((*closest_gps)->header.stamp - keyframe->stamp).toSec())) {
+      if(0.2 < std::abs(((*closest_gps)->header.stamp - keyframe->stamp).toSec()))
         continue;
-      }
 
       // convert (latitude, longitude, altitude) -> (easting, northing, altitude) in UTM coordinate
+      // 将经纬度转换为utm
       geodesy::UTMPoint utm;
       geodesy::fromMsg((*closest_gps)->position, utm);
       Eigen::Vector3d xyz(utm.easting, utm.northing, utm.altitude);
 
       // the first gps data position will be the origin of the map
       // 将第一帧有效GPS位置作为地图的原点
-      if(!zero_utm) {
+      if(!zero_utm)
         zero_utm = xyz;
-      }
+        
       xyz -= (*zero_utm);
 
       keyframe->utm_coord = xyz;
 
       g2o::OptimizableGraph::Edge* edge;
-      if(std::isnan(xyz.z())){
+      if(std::isnan(xyz.z()))
+      {
         Eigen::Matrix2d information_matrix = Eigen::Matrix2d::Identity() / gps_edge_stddev_xy;
         edge = graph_slam->add_se3_prior_xy_edge(keyframe->node, xyz.head<2>(), information_matrix);
-      } else {
+      } 
+      else 
+      {
         Eigen::Matrix3d information_matrix = Eigen::Matrix3d::Identity();
         information_matrix.block<2, 2>(0, 0) /= gps_edge_stddev_xy;
         information_matrix(2, 2) /= gps_edge_stddev_z;
         edge = graph_slam->add_se3_prior_xyz_edge(keyframe->node, xyz, information_matrix);
       }
-      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("gps_edge_robust_kernel", "NONE"), private_nh.param<double>("gps_edge_robust_kernel_size", 1.0));
+      
+      static std::string gps_edge_robust_kernel = private_nh.param<std::string>("gps_edge_robust_kernel", "NONE");
+      static double gps_edge_robust_kernel_size = private_nh.param<double>("gps_edge_robust_kernel_size", 1.0);
+      graph_slam->add_robust_kernel(edge, gps_edge_robust_kernel, gps_edge_robust_kernel_size);
 
       updated = true;
     }
 
     auto remove_loc = std::upper_bound(gps_queue.begin(), gps_queue.end(), keyframes.back()->stamp,
       [=](const ros::Time& stamp, const geographic_msgs::GeoPointStampedConstPtr& geopoint) {
-        return stamp < geopoint->header.stamp;
-      }
-    );
+        return stamp < geopoint->header.stamp;});
     gps_queue.erase(gps_queue.begin(), remove_loc);
     return updated;
   }
@@ -463,73 +494,82 @@ private:
   void utm_callback(const nav_msgs::Odometry::Ptr& utm_msg)
   {
   	std::lock_guard<std::mutex> lock(utm_queue_mutex);
+  	utm_msg->header.stamp += ros::Duration(utm_time_offset);
     utm_queue.push_back(utm_msg);
   }
   
-  bool flush_utm_queue() {
+  bool flush_utm_queue()
+  {
     std::lock_guard<std::mutex> lock(utm_queue_mutex);
-    if(keyframes.empty() || utm_queue.empty()) {
+    if(keyframes.empty() || utm_queue.empty())
       return false;
-    }
 
     bool updated = false;
     auto utm_cursor = utm_queue.begin();
 
-    for(auto& keyframe : keyframes) {
-      if(keyframe->stamp > utm_queue.back()->header.stamp) {
+    for(auto& keyframe : keyframes) 
+    {
+      if(keyframe->stamp > utm_queue.back()->header.stamp)
         break;
-      }
-
-      if(keyframe->stamp < (*utm_cursor)->header.stamp || keyframe->utm_coord) {
+      
+      //1.keyframe时间比第一帧gps时间还早
+      //2.当前keyframe 的 utm_coord 已经被赋值
+      if(keyframe->stamp < (*utm_cursor)->header.stamp || keyframe->utm_coord)
         continue;
-      }
 
       // find the utm data which is closest to the keyframe
+      // 循环前后帧对比，查找距离关键帧最近的utm数据
       auto closest_utm = utm_cursor;
-      for(auto utm = utm_cursor; utm != utm_queue.end(); utm++) {
+      for(auto utm = utm_cursor; utm != utm_queue.end(); utm++) 
+      {
         auto dt = ((*closest_utm)->header.stamp - keyframe->stamp).toSec();
         auto dt2 = ((*utm)->header.stamp - keyframe->stamp).toSec();
-        if(std::abs(dt) < std::abs(dt2)) {
+        if(std::abs(dt) < std::abs(dt2))
           break;
-        }
 
         closest_utm = utm;
       }
 
       // if the time residual between the utm and keyframe is too large, skip it
-      if(0.2 < std::abs(((*closest_utm)->header.stamp - keyframe->stamp).toSec())) {
-        continue;
+      if(0.2 < std::abs(((*closest_utm)->header.stamp - keyframe->stamp).toSec())) 
+      {
+          ROS_INFO("[%s] the time residual between the utm and keyframe is too large, skip it.",__NAME__);
+          continue;
       }
-	  auto pose = (*closest_utm)->pose.pose.position;
-      Eigen::Vector3d xyz(pose.x, pose.y, 0);
       
-      std::cout << std::fixed << std::setprecision(3) <<  pose.x << " " << pose.y << std::endl;
-      
-      std::cout << std::resetiosflags(std::ios::fixed);
-
-      // the first gps data position will be the origin of the map
-      if(!zero_utm) {
-        zero_utm = xyz;
+      if(!zero_utm)
+      {
+          const auto &pose = (*closest_utm)->pose.pose.position;
+          Eigen::Vector3d global_xyz(pose.x, pose.y, 0);
+          zero_utm = global_xyz;
       }
-      xyz -= (*zero_utm);
-
-      keyframe->utm_coord = xyz;
-
+        
+      Eigen::Isometry3d utm_odom = get_odom_by_gps(*closest_utm);
+      Eigen::Vector3d local_xyz = utm_odom.translation(); local_xyz[2] = 0;
+      
+      keyframe->utm_coord = local_xyz;
+      
+      std::cout << "keyframe position by utm " << local_xyz.transpose() << "\n"; 
+    
       g2o::OptimizableGraph::Edge* edge;
       
       Eigen::Matrix2d information_matrix = Eigen::Matrix2d::Identity() / utm_edge_stddev_xy;
-      edge = graph_slam->add_se3_prior_xy_edge(keyframe->node, xyz.head<2>(), information_matrix);
-     
-      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("utm_edge_robust_kernel", "NONE"), private_nh.param<double>("utm_edge_robust_kernel_size", 1.0));
+      edge = graph_slam->add_se3_prior_xy_edge(keyframe->node, local_xyz.head<2>(), information_matrix);
+      
+      
+      static std::string utm_edge_robust_kernel = private_nh.param<std::string>("utm_edge_robust_kernel", "NONE");
+      static double utm_edge_robust_kernel_size = private_nh.param<double>("utm_edge_robust_kernel_size", 1.0);
+      graph_slam->add_robust_kernel(edge, utm_edge_robust_kernel, utm_edge_robust_kernel_size);
 
       updated = true;
     }
-
+    
+    
+    // 移除陈旧的utm数据
     auto remove_loc = std::upper_bound(utm_queue.begin(), utm_queue.end(), keyframes.back()->stamp,
       [=](const ros::Time& stamp, const nav_msgs::Odometry::Ptr& utm_msg) {
-        return stamp < utm_msg->header.stamp;
-      }
-    );
+        return stamp < utm_msg->header.stamp;});
+        
     utm_queue.erase(utm_queue.begin(), remove_loc);
     return updated;
   }
@@ -650,12 +690,12 @@ private:
    * @brief this methods associates floor coefficients messages with registered keyframes, and then adds the associated coeffs to the pose graph
    * @return if true, at least one floor plane edge is added to the pose graph
    */
-  bool flush_floor_queue() {
+  bool flush_floor_queue() 
+  {
     std::lock_guard<std::mutex> lock(floor_coeffs_queue_mutex);
 
-    if(keyframes.empty()) {
+    if(keyframes.empty()) 
       return false;
-    }
 
     const auto& latest_keyframe_stamp = keyframes.back()->stamp;
 
@@ -670,7 +710,8 @@ private:
         continue;
       }
 
-      if(!floor_plane_node) {
+      if(!floor_plane_node) 
+      {
         floor_plane_node = graph_slam->add_plane_node(Eigen::Vector4d(0.0, 0.0, 1.0, 0.0));
         floor_plane_node->setFixed(true);
       }
@@ -1128,10 +1169,12 @@ private:
   std::unique_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> cloud_sub;
   std::unique_ptr<message_filters::Synchronizer<MySyncPolicy1>> sync1;
 
-  bool use_gps_odom;
+  bool use_gps_instead_lidar_odom;
   ros::Subscriber gps_sub;
   ros::Subscriber nmea_sub;
   ros::Subscriber navsat_sub;
+  
+  ros::Subscriber utm_sub;
 
   ros::Subscriber imu_sub;
   ros::Subscriber floor_sub;
@@ -1173,7 +1216,10 @@ private:
   std::deque<geographic_msgs::GeoPointStampedConstPtr> gps_queue;
   
   //utm queue
+  double utm_time_offset;
   double utm_edge_stddev_xy;
+  double utm_edge_stddev_z;
+  
   std::mutex utm_queue_mutex;
   std::deque<nav_msgs::Odometry::Ptr> utm_queue;
   

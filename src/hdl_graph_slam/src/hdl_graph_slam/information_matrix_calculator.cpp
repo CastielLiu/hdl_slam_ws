@@ -22,6 +22,12 @@ InformationMatrixCalculator::~InformationMatrixCalculator() {
 
 }
 
+/*@brief 计算两帧点云配准里程计的协方差矩阵
+ *@brief 将cloud2经变换矩阵转换后求取与cloud1的‘距离’得分
+ *@brief 然后计算协方差
+ *@雷达里程计在配准时便计算得到得分，此处又计算一遍，是否可将配准得分传递至此
+ */
+
 Eigen::MatrixXd InformationMatrixCalculator::calc_information_matrix(const pcl::PointCloud<PointT>::ConstPtr& cloud1, const pcl::PointCloud<PointT>::ConstPtr& cloud2, const Eigen::Isometry3d& relpose) const {
   if(use_const_inf_matrix) {
     Eigen::MatrixXd inf = Eigen::MatrixXd::Identity(6, 6);

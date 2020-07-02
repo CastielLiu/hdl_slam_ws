@@ -41,18 +41,14 @@ static geometry_msgs::TransformStamped matrix2transform(const ros::Time& stamp, 
 
 static geometry_msgs::TransformStamped matrix2transform(const ros::Time& stamp, Eigen::Isometry3d& pose, const std::string& frame_id, const std::string& child_frame_id) 
 {
-  Eigen::Matrix3d matrix;
-  for(int row=0; row<3; ++row)
-    for(int col=0; col<3; ++col)
-       matrix << pose(row,col);
-  
-  Eigen::Quaterniond quat(matrix);
+  Eigen::Quaterniond quat(pose.linear());
   quat.normalize();
   geometry_msgs::Quaternion odom_quat;
   odom_quat.w = quat.w();
   odom_quat.x = quat.x();
   odom_quat.y = quat.y();
   odom_quat.z = quat.z();
+  //std::cout << quat.x() << "\t" << quat.y() << "\t" << quat.z() << "\t" << quat.w() << std::endl;
 
 
   geometry_msgs::TransformStamped odom_trans;
@@ -81,10 +77,11 @@ static Eigen::Isometry3d odom2isometry(const nav_msgs::OdometryConstPtr& odom_ms
   Eigen::Isometry3d isometry = Eigen::Isometry3d::Identity();
   isometry.linear() = quat.toRotationMatrix(); //四元数转旋转矩阵
   isometry.translation() = Eigen::Vector3d(position.x, position.y, position.z);
+  
   return isometry;
 }
 
-static Eigen::Isometry3d odom2isometry(const nav_msgs::Odometry odom) 
+static Eigen::Isometry3d odom2isometry(const nav_msgs::Odometry& odom) 
 {
   const auto& orientation = odom.pose.pose.orientation;
   const auto& position = odom.pose.pose.position;
