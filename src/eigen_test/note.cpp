@@ -1,4 +1,7 @@
 
+1. Eigen四元数 构造方式
+Quaternion (const Scalar &w, const Scalar &x, const Scalar &y, const Scalar &z)
+
 
 
 
@@ -33,6 +36,13 @@ Eigen::Matrix3d euler2Matrix(const double roll, const double pitch, const double
 	return rotation_matrix;
 }
 
+//旋转矩阵转四元数
+Eigen::Matrix3d rotation_matrix;
+Eigen::Quaterniond quaternion(rotation_matrix);
+
+Eigen::Quaterniond quaternion;
+quaternion=rotation_matrix;
+
 //监听坐标变换
 tf::TransformStamped transform;
 tf_listener.waitForTransform(parent_frame_id, child_frame_id, ros::Time(0), ros::Duration(1.0));
@@ -53,7 +63,8 @@ tf::transformTFToEigen(*(tf::Transform *)&transform, isometry);
 
 
 
-//变换矩阵（4X4）
-//Eigen::Isometry3d
+//变换矩阵（4X4） Eigen::Isometry3d isometry
+1. 获取旋转矩阵 Eigen::Matrix3d matrix = isometry.linear();
+2. 获取平移矩阵 Eigen::Vector3d translation = isometry.translation();
 
 

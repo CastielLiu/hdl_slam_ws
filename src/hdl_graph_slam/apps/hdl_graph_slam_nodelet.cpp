@@ -122,6 +122,7 @@ public:
     floor_edge_stddev = private_nh.param<double>("floor_edge_stddev", 10.0);
     
     //utm
+    enable_utm_xy = private_nh.param<bool>("enable_utm",false);
     utm_time_offset = private_nh.param<double>("utm_time_offset", 0.0);
     utm_edge_stddev_xy = private_nh.param<double>("utm_edge_stddev_xy", 10000.0);
     utm_edge_stddev_z = private_nh.param<double>("utm_edge_stddev_z", 10.0);
@@ -155,7 +156,7 @@ public:
       navsat_sub = mt_nh.subscribe("/gps/navsat", 1024, &HdlGraphSlamNodelet::navsat_callback, this);
     }
     
-    if(!use_gps_instead_lidar_odom && private_nh.param<bool>("enable_utm",false))
+    if((!use_gps_instead_lidar_odom && enable_utm_xy) || enable_imu_orientation)
     {
       std::string utm_topic = private_nh.param<std::string>("utm_topic","/gps_odom");
       utm_sub = mt_nh.subscribe(utm_topic,1024,&HdlGraphSlamNodelet::utm_callback, this);
@@ -191,9 +192,7 @@ private:
     nav_msgs::Odometry odom = *utm_odom_msg;
     odom.pose.pose.position.z = 0;
     
-    static bool tf_ok = false;
-    static Eigen::Isometry3d gps_in_base, gps_to_base;
-    if(!tf_ok)
+    if(!gps_to_base)
     {
       //获取gps与base_link的坐标变换
       std::string gps_frame_id = utm_odom_msg->child_frame_id;
@@ -214,13 +213,16 @@ private:
         std::cerr << "failed to find the transform from [" << base_frame_id << "] to [" << utm_odom_msg->child_frame_id << "]!!" << std::endl;
         return Eigen::Isometry3d::Identity();
       }
-      tf::transformTFToEigen(tf_gps2base.inverse(), gps_in_base);
-      tf::transformTFToEigen(tf_gps2base, gps_to_base);
-      tf_ok = true;
+      //tf::transformTFToEigen(tf_gps2base.inverse(), gps_in_base);
+      
+      Eigen::Isometry3d _gps_to_base_;
+      tf::transformTFToEigen(tf_gps2base, _gps_to_base_);
+      
+      gps_to_base = _gps_to_base_;
     }
     //由gps定位点与gps在base_link的安装位置,求base_link的大地坐标
     Eigen::Isometry3d gps_in_world = odom2isometry(odom);
-    Eigen::Isometry3d base_in_world = gps_to_base * gps_in_world;
+    Eigen::Isometry3d base_in_world = (*gps_to_base) * gps_in_world;
     
     //地图原点在大地坐标系下的位置
     if(!map_in_world)
@@ -230,6 +232,50 @@ private:
     
     //base_in_map -> local_odom
     return map_in_world_reverse * base_in_world;
+  }
+  
+  Eigen::Quaterniond get_orientation_by_gps(const nav_msgs::OdometryConstPtr& utm_odom_msg)
+  {
+    const geometry_msgs::Quaternion& gps_ori_msg = utm_odom_msg->pose.pose.orientation;
+    Eigen::Quaterniond gps_ori(gps_ori_msg.w, gps_ori_msg.x, gps_ori_msg.y, gps_ori_msg.z);
+    gps_ori.normalize();
+    
+    if(!gps_to_base)
+    {
+      //获取gps与base_link的坐标变换
+      std::string gps_frame_id = utm_odom_msg->child_frame_id;
+      if(gps_frame_id.empty())
+      {
+          gps_frame_id = "gps";
+          ROS_INFO("gps odom child frame id is empty, set to gps");
+      }
+      
+      tf::StampedTransform tf_gps2base;
+      try
+      {
+        tf_listener.waitForTransform(base_frame_id ,gps_frame_id, ros::Time(0), ros::Duration(1.0));
+        tf_listener.lookupTransform(base_frame_id , gps_frame_id, ros::Time(0), tf_gps2base);
+      } 
+      catch (std::exception& e) 
+      {
+        std::cerr << "failed to find the transform from [" << base_frame_id << "] to [" << utm_odom_msg->child_frame_id << "]!!" << std::endl;
+        return gps_ori;
+      }
+      
+      Eigen::Isometry3d _gps_to_base_;
+      tf::transformTFToEigen(tf_gps2base, _gps_to_base_);
+      
+      gps_to_base = _gps_to_base_;
+    }
+    
+    static Eigen::Quaterniond gps_to_base_quat((*gps_to_base).linear());
+    
+    Eigen::Quaterniond result = gps_to_base_quat * gps_ori;
+    
+    std::cout << "imu_ori: " << gps_ori.matrix().eulerAngles(2,1,0) *180.0/M_PI << std::endl;
+    std::cout << "base_ori: " << result.matrix().eulerAngles(2,1,0) *180.0/M_PI << std::endl;
+    
+    return result;
   }
 
   /**
@@ -543,23 +589,36 @@ private:
           Eigen::Vector3d global_xyz(pose.x, pose.y, 0);
           zero_utm = global_xyz;
       }
-        
-      Eigen::Isometry3d utm_odom = get_odom_by_gps(*closest_utm);
-      Eigen::Vector3d local_xyz = utm_odom.translation(); local_xyz[2] = 0;
       
-      keyframe->utm_coord = local_xyz;
-      
-      std::cout << "keyframe position by utm " << local_xyz.transpose() << "\n"; 
-    
-      g2o::OptimizableGraph::Edge* edge;
-      
-      Eigen::Matrix2d information_matrix = Eigen::Matrix2d::Identity() / utm_edge_stddev_xy;
-      edge = graph_slam->add_se3_prior_xy_edge(keyframe->node, local_xyz.head<2>(), information_matrix);
-      
-      
-      static std::string utm_edge_robust_kernel = private_nh.param<std::string>("utm_edge_robust_kernel", "NONE");
-      static double utm_edge_robust_kernel_size = private_nh.param<double>("utm_edge_robust_kernel_size", 1.0);
-      graph_slam->add_robust_kernel(edge, utm_edge_robust_kernel, utm_edge_robust_kernel_size);
+      if(enable_utm_xy && !keyframe->utm_coord)
+      {
+          Eigen::Isometry3d utm_odom = get_odom_by_gps(*closest_utm);
+		  Eigen::Vector3d local_xyz = utm_odom.translation(); local_xyz[2] = 0;
+		  
+		  keyframe->utm_coord = local_xyz;
+		  
+		  std::cout << "keyframe position by utm " << local_xyz.transpose() << "\n"; 
+		
+		  g2o::OptimizableGraph::Edge* edge;
+		  
+		  Eigen::Matrix2d information_matrix = Eigen::Matrix2d::Identity() / utm_edge_stddev_xy;
+		  edge = graph_slam->add_se3_prior_xy_edge(keyframe->node, local_xyz.head<2>(), information_matrix);
+		  
+		  static std::string utm_edge_robust_kernel = private_nh.param<std::string>("utm_edge_robust_kernel", "NONE");
+		  static double utm_edge_robust_kernel_size = private_nh.param<double>("utm_edge_robust_kernel_size", 1.0);
+		  graph_slam->add_robust_kernel(edge, utm_edge_robust_kernel, utm_edge_robust_kernel_size);
+	  }
+
+      if(enable_imu_orientation && !keyframe->orientation)
+      {
+        keyframe->orientation = get_orientation_by_gps(*closest_utm);
+        if(keyframe->orientation->w() < 0.0)
+           keyframe->orientation->coeffs() = -keyframe->orientation->coeffs();
+        Eigen::MatrixXd info = Eigen::MatrixXd::Identity(3, 3) / imu_orientation_edge_stddev;
+        auto edge = graph_slam->add_se3_prior_quat_edge(keyframe->node, *keyframe->orientation, info);
+        graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("imu_orientation_edge_robust_kernel", "NONE"), 
+        									private_nh.param<double>("imu_orientation_edge_robust_kernel_size", 1.0));
+      }
 
       updated = true;
     }
@@ -575,10 +634,10 @@ private:
   }
   
 
-  void imu_callback(const sensor_msgs::ImuPtr& imu_msg) {
-    if(!enable_imu_orientation && !enable_imu_acceleration) {
+  void imu_callback(const sensor_msgs::ImuPtr& imu_msg) 
+  {
+    if(!enable_imu_orientation && !enable_imu_acceleration)
       return;
-    }
 
     std::lock_guard<std::mutex> lock(imu_queue_mutex);
     imu_msg->header.stamp += ros::Duration(imu_time_offset);
@@ -587,38 +646,35 @@ private:
 
   bool flush_imu_queue() {
     std::lock_guard<std::mutex> lock(imu_queue_mutex);
-    if(keyframes.empty() || imu_queue.empty() || base_frame_id.empty()) {
+    if(keyframes.empty() || imu_queue.empty() || base_frame_id.empty())
       return false;
-    }
 
     bool updated = false;
     auto imu_cursor = imu_queue.begin();
 
-    for(auto& keyframe : keyframes) {
-      if(keyframe->stamp > imu_queue.back()->header.stamp) {
+    for(auto& keyframe : keyframes) 
+    {
+      if(keyframe->stamp > imu_queue.back()->header.stamp)
         break;
-      }
 
-      if(keyframe->stamp < (*imu_cursor)->header.stamp || keyframe->acceleration) {
+      if(keyframe->stamp < (*imu_cursor)->header.stamp || keyframe->acceleration || keyframe->orientation)
         continue;
-      }
 
       // find imu data which is closest to the keyframe
       auto closest_imu = imu_cursor;
-      for(auto imu = imu_cursor; imu != imu_queue.end(); imu++) {
+      for(auto imu = imu_cursor; imu != imu_queue.end(); imu++) 
+      {
         auto dt = ((*closest_imu)->header.stamp - keyframe->stamp).toSec();
         auto dt2 = ((*imu)->header.stamp - keyframe->stamp).toSec();
-        if(std::abs(dt) < std::abs(dt2)) {
+        if(std::abs(dt) < std::abs(dt2))
           break;
-        }
 
         closest_imu = imu;
       }
 
       imu_cursor = closest_imu;
-      if(0.2 < std::abs(((*closest_imu)->header.stamp - keyframe->stamp).toSec())) {
+      if(0.2 < std::abs(((*closest_imu)->header.stamp - keyframe->stamp).toSec()))
         continue;
-      }
 
       const auto& imu_ori = (*closest_imu)->orientation;
       const auto& imu_acc = (*closest_imu)->linear_acceleration;
@@ -633,10 +689,13 @@ private:
       acc_imu.vector = (*closest_imu)->linear_acceleration;
       quat_imu.quaternion = (*closest_imu)->orientation;
 
-      try {
+      try 
+      {
         tf_listener.transformVector(base_frame_id, acc_imu, acc_base);
         tf_listener.transformQuaternion(base_frame_id, quat_imu, quat_base);
-      } catch (std::exception& e) {
+      } 
+      catch (std::exception& e) 
+      {
         std::cerr << "failed to find transform!!" << std::endl;
         return false;
       }
@@ -648,25 +707,27 @@ private:
         keyframe->orientation->coeffs() = -keyframe->orientation->coeffs();
       }
 
-      if(enable_imu_orientation) {
+      if(enable_imu_orientation) 
+      {
         Eigen::MatrixXd info = Eigen::MatrixXd::Identity(3, 3) / imu_orientation_edge_stddev;
         auto edge = graph_slam->add_se3_prior_quat_edge(keyframe->node, *keyframe->orientation, info);
-        graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("imu_orientation_edge_robust_kernel", "NONE"), private_nh.param<double>("imu_orientation_edge_robust_kernel_size", 1.0));
+        graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("imu_orientation_edge_robust_kernel", "NONE"), 
+        									private_nh.param<double>("imu_orientation_edge_robust_kernel_size", 1.0));
       }
 
-      if(enable_imu_acceleration) {
+      if(enable_imu_acceleration) 
+      {
         Eigen::MatrixXd info = Eigen::MatrixXd::Identity(3, 3) / imu_acceleration_edge_stddev;
         g2o::OptimizableGraph::Edge* edge = graph_slam->add_se3_prior_vec_edge(keyframe->node, Eigen::Vector3d::UnitZ(), *keyframe->acceleration, info);
-        graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("imu_acceleration_edge_robust_kernel", "NONE"), private_nh.param<double>("imu_acceleration_edge_robust_kernel_size", 1.0));
+        graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("imu_acceleration_edge_robust_kernel", "NONE"), 
+        									private_nh.param<double>("imu_acceleration_edge_robust_kernel_size", 1.0));
       }
       updated = true;
     }
 
     auto remove_loc = std::upper_bound(imu_queue.begin(), imu_queue.end(), keyframes.back()->stamp,
       [=](const ros::Time& stamp, const sensor_msgs::ImuConstPtr& imu) {
-        return stamp < imu->header.stamp;
-      }
-    );
+        return stamp < imu->header.stamp;});
     imu_queue.erase(imu_queue.begin(), remove_loc);
 
     return true;
@@ -1117,9 +1178,11 @@ private:
     cloud->header.frame_id = map_frame_id;
     cloud->header.stamp = snapshot.back()->cloud->header.stamp;
 
-    if(zero_utm) {
+    if(zero_utm)
+    {
       std::ofstream ofs(req.destination + ".utm");
-      ofs << (*zero_utm).transpose() << std::endl;
+      ofs << std::fixed << std::setprecision(3) << (*zero_utm).transpose() << std::endl;
+      ROS_INFO("[%s] Save %s ok.",__NAME__, req.destination + ".utm");
     }
 
     int ret = pcl::io::savePCDFileBinary(req.destination, *cloud);
@@ -1211,12 +1274,14 @@ private:
   double gps_edge_stddev_z;
   boost::optional<Eigen::Isometry3d> map_in_world;
   boost::optional<Eigen::Vector3d> zero_utm;
+  boost::optional<Eigen::Isometry3d> gps_to_base;
   
   std::mutex gps_queue_mutex;
   std::deque<geographic_msgs::GeoPointStampedConstPtr> gps_queue;
   
   //utm queue
   double utm_time_offset;
+  bool enable_utm_xy;
   double utm_edge_stddev_xy;
   double utm_edge_stddev_z;
   

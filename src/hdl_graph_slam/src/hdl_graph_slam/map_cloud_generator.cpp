@@ -12,9 +12,16 @@ MapCloudGenerator::~MapCloudGenerator() {
 }
 
 pcl::PointCloud<MapCloudGenerator::PointT>::Ptr MapCloudGenerator::generate(const std::vector<KeyFrameSnapshot::Ptr>& keyframes, double resolution) const {
-  if(keyframes.empty()) {
+  if(keyframes.empty()) 
+  {
     std::cerr << "warning: keyframes empty!!" << std::endl;
     return nullptr;
+  }
+  
+  if(resolution <= 0)
+  {
+    resolution = 0.05;
+    ROS_INFO("save map use default resolution: %f", resolution);
   }
 
   pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
