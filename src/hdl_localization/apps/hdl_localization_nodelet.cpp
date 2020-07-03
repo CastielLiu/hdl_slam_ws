@@ -48,11 +48,14 @@ public:
 
     use_imu = private_nh.param<bool>("use_imu", true);
     invert_imu = private_nh.param<bool>("invert_imu", false);
-    if(use_imu) {
+    if(use_imu) 
+    {
       NODELET_INFO("enable imu-based prediction");
       imu_sub = mt_nh.subscribe("/gpsimu_driver/imu_data", 256, &HdlLocalizationNodelet::imu_callback, this);
     }
-    points_sub = mt_nh.subscribe("/velodyne_points", 5, &HdlLocalizationNodelet::points_callback, this);
+    std::string points_topic = private_nh.param<std::string>("points_topic", "/velodyne_points");
+    
+    points_sub = mt_nh.subscribe(points_topic, 5, &HdlLocalizationNodelet::points_callback, this);
     globalmap_sub = nh.subscribe("/globalmap", 1, &HdlLocalizationNodelet::globalmap_callback, this);
     initialpose_sub = nh.subscribe("/initialpose", 8, &HdlLocalizationNodelet::initialpose_callback, this);
 
@@ -61,29 +64,41 @@ public:
   }
 
 private:
-  void initialize_params() {
+  void initialize_params() 
+  {
     // intialize scan matching method
-    double downsample_resolution = private_nh.param<double>("downsample_resolution", 0.1);
+    double downsample_resolution = private_nh.param<double>("downsample_resolution", 0.0);
+    if(downsample_resolution != 0.0)
+    {
+        boost::shared_ptr<pcl::VoxelGrid<PointT>> voxelgrid(new pcl::VoxelGrid<PointT>());
+        voxelgrid->setLeafSize(downsample_resolution, downsample_resolution, downsample_resolution);
+        downsample_filter = voxelgrid;
+    }
+    
     std::string ndt_neighbor_search_method = private_nh.param<std::string>("ndt_neighbor_search_method", "DIRECT7");
-
     double ndt_resolution = private_nh.param<double>("ndt_resolution", 1.0);
-    boost::shared_ptr<pcl::VoxelGrid<PointT>> voxelgrid(new pcl::VoxelGrid<PointT>());
-    voxelgrid->setLeafSize(downsample_resolution, downsample_resolution, downsample_resolution);
-    downsample_filter = voxelgrid;
-
+   
     pclomp::NormalDistributionsTransform<PointT, PointT>::Ptr ndt(new pclomp::NormalDistributionsTransform<PointT, PointT>());
     ndt->setTransformationEpsilon(0.01);
     ndt->setResolution(ndt_resolution);
-    if(ndt_neighbor_search_method == "DIRECT1") {
+    ndt->setMaximumIterations(64);
+    if(ndt_neighbor_search_method == "DIRECT1") 
+    {
       NODELET_INFO("search_method DIRECT1 is selected");
       ndt->setNeighborhoodSearchMethod(pclomp::DIRECT1);
-    } else if(ndt_neighbor_search_method == "DIRECT7") {
+    } 
+    else if(ndt_neighbor_search_method == "DIRECT7") 
+    {
       NODELET_INFO("search_method DIRECT7 is selected");
       ndt->setNeighborhoodSearchMethod(pclomp::DIRECT7);
-    } else {
-      if(ndt_neighbor_search_method == "KDTREE") {
+    } 
+    else 
+    {
+      if(ndt_neighbor_search_method == "KDTREE") 
+      {
         NODELET_INFO("search_method KDTREE is selected");
-      } else {
+      } else 
+      {
         NODELET_WARN("invalid search method was given");
         NODELET_WARN("default method is selected (KDTREE)");
       }
@@ -92,7 +107,8 @@ private:
     registration = ndt;
 
     // initialize pose estimator
-    if(private_nh.param<bool>("specify_init_pose", true)) {
+    if(private_nh.param<bool>("specify_init_pose", true)) 
+    {
       NODELET_INFO("initialize pose estimator with specified parameters!!");
       pose_estimator.reset(new hdl_localization::PoseEstimator(registration,
         ros::Time::now(),
@@ -117,14 +133,17 @@ private:
    * @brief callback for point cloud data
    * @param points_msg
    */
-  void points_callback(const sensor_msgs::PointCloud2ConstPtr& points_msg) {
+  void points_callback(const sensor_msgs::PointCloud2ConstPtr& points_msg) 
+  {
     std::lock_guard<std::mutex> estimator_lock(pose_estimator_mutex);
-    if(!pose_estimator) {
+    if(!pose_estimator) 
+    {
       NODELET_ERROR("waiting for initial pose input!!");
       return;
     }
 
-    if(!globalmap) {
+    if(!globalmap) 
+    {
       NODELET_ERROR("globalmap has not been received!!");
       return;
     }
@@ -133,30 +152,38 @@ private:
     pcl::PointCloud<PointT>::Ptr pcl_cloud(new pcl::PointCloud<PointT>());
     pcl::fromROSMsg(*points_msg, *pcl_cloud);
 
-    if(pcl_cloud->empty()) {
+    if(pcl_cloud->empty()) 
+    {
       NODELET_ERROR("cloud is empty!!");
       return;
     }
 
     // transform pointcloud into odom_child_frame_id  
-    pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());  
-    if(!pcl_ros::transformPointCloud(odom_child_frame_id, *pcl_cloud, *cloud, this->tf_listener)) {
+    pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
+    if(points_msg->header.frame_id != odom_child_frame_id)
+    {
+       if(!pcl_ros::transformPointCloud(odom_child_frame_id, *pcl_cloud, *cloud, this->tf_listener)) 
+       {
         NODELET_ERROR("point cloud cannot be transformed into target frame!!");
         return;
-    } 
+       } 
+    }
+    else
+      cloud = pcl_cloud;
 
-    auto filtered = downsample(cloud);
+    pcl::PointCloud<PointT>::ConstPtr filtered = downsample(cloud);
 
     // predict
-    if(!use_imu) {
+    if(!use_imu) 
       pose_estimator->predict(stamp, Eigen::Vector3f::Zero(), Eigen::Vector3f::Zero());
-    } else {
+    else 
+    {
       std::lock_guard<std::mutex> lock(imu_data_mutex);
       auto imu_iter = imu_data.begin();
-      for(imu_iter; imu_iter != imu_data.end(); imu_iter++) {
-        if(stamp < (*imu_iter)->header.stamp) {
+      for(imu_iter; imu_iter != imu_data.end(); imu_iter++) 
+      {
+        if(stamp < (*imu_iter)->header.stamp)
           break;
-        }
         const auto& acc = (*imu_iter)->linear_acceleration;
         const auto& gyro = (*imu_iter)->angular_velocity;
         double gyro_sign = invert_imu ? -1.0 : 1.0;
@@ -174,13 +201,14 @@ private:
     double avg_processing_time = std::accumulate(processing_time.begin(), processing_time.end(), 0.0) / processing_time.size();
     // NODELET_INFO_STREAM("processing_time: " << avg_processing_time * 1000.0 << "[msec]");
 
-    if(aligned_pub.getNumSubscribers()) {
+    if(aligned_pub.getNumSubscribers()) 
+    {
       aligned->header.frame_id = "map";
       aligned->header.stamp = cloud->header.stamp;
       aligned_pub.publish(aligned);
     }
 
-    publish_odometry(points_msg->header.stamp, pose_estimator->matrix());
+    publish_odometry(points_msg->header.stamp, pose_estimator->matrix(), pose_estimator->vel());
   }
 
   /**
@@ -221,9 +249,8 @@ private:
    * @return downsampled cloud
    */
   pcl::PointCloud<PointT>::ConstPtr downsample(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
-    if(!downsample_filter) {
+    if(!downsample_filter)
       return cloud;
-    }
 
     pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>());
     downsample_filter->setInputCloud(cloud);
@@ -238,7 +265,8 @@ private:
    * @param stamp  timestamp
    * @param pose   odometry pose to be published
    */
-  void publish_odometry(const ros::Time& stamp, const Eigen::Matrix4f& pose) {
+  void publish_odometry(const ros::Time& stamp, const Eigen::Matrix4f& pose, const Eigen::Vector3f& vel) 
+  {
     // broadcast the transform over tf
     geometry_msgs::TransformStamped odom_trans = matrix2transform(stamp, pose, "map", odom_child_frame_id);
     pose_broadcaster.sendTransform(odom_trans);
@@ -254,9 +282,9 @@ private:
     odom.pose.pose.orientation = odom_trans.transform.rotation;
 
     odom.child_frame_id = odom_child_frame_id;
-    odom.twist.twist.linear.x = 0.0;
-    odom.twist.twist.linear.y = 0.0;
-    odom.twist.twist.angular.z = 0.0;
+    odom.twist.twist.linear.x = vel(0);
+    odom.twist.twist.linear.y = vel(1);
+    odom.twist.twist.angular.z = vel(2);
 
     pose_pub.publish(odom);
   }

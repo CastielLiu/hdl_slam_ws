@@ -7,7 +7,7 @@
   <arg name="enable_utm" default="true" />
   <arg name="use_match_odom" default="true" />
   <arg name="enable_imu_acc" default="false" />
-  <arg name="enable_imu_ori" default="false" />
+  <arg name="enable_imu_ori" default="true" />
   <arg name="raw_points_topic" default="/pandar_points" />
   
   <param name="use_sim_time" value="true"/>
@@ -32,7 +32,7 @@
     <param name="use_distance_filter" value="true" />
     <param name="distance_near_thresh" value="2" />
     <param name="distance_far_thresh" value="50.0" />
-    <param name="height_thresh" value="0.1" />
+    <param name="height_thresh" value="2.0" />
     <!-- NONE, VOXELGRID, or APPROX_VOXELGRID -->
     <param name="downsample_method" value="VOXELGRID" />
     <param name="downsample_resolution" value="0.1" />

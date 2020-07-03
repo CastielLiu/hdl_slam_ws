@@ -603,6 +603,10 @@ private:
           Eigen::Vector3d global_xyz(pose.x, pose.y, 0);
           zero_utm = global_xyz;
       }
+     
+      if(!zero_RPY)
+         zero_RPY = Eigen::Vector3d((*closest_utm)->pose.covariance[4],(*closest_utm)->pose.covariance[5],(*closest_utm)->pose.covariance[3]) * 180.0/M_PI ;
+         
       
       if(enable_utm_xy && !keyframe->utm_coord)
       {
@@ -1190,10 +1194,10 @@ private:
       return true;
     }
 
-    if(zero_utm && req.utm) {
-      for(auto& pt : cloud->points) {
+    if(zero_utm && req.utm) 
+    {
+      for(auto& pt : cloud->points) 
         pt.getVector3fMap() += (*zero_utm).cast<float>();
-      }
     }
 
     cloud->header.frame_id = map_frame_id;
@@ -1202,8 +1206,14 @@ private:
     if(zero_utm)
     {
       std::ofstream ofs(req.destination + ".utm");
-      ofs << std::fixed << std::setprecision(3) << (*zero_utm).transpose() << std::endl;
-      ROS_INFO("[%s] Save %s ok.",__NAME__, req.destination + ".utm");
+      ofs << std::fixed << std::setprecision(3) << (*zero_utm).transpose() << "\t";
+
+      if(zero_RPY)
+      {
+         ofs << std::fixed << std::setprecision(3) << (*zero_RPY).transpose() << "\r\n";
+      }
+          
+      ROS_INFO("[%s] Save %s ok.",__NAME__, (req.destination + ".utm").c_str());
     }
 
     int ret = pcl::io::savePCDFileBinary(req.destination, *cloud);
@@ -1295,6 +1305,8 @@ private:
   double gps_edge_stddev_z;
   boost::optional<Eigen::Isometry3d> map_in_world;
   boost::optional<Eigen::Vector3d> zero_utm;
+  boost::optional<Eigen::Quaterniond> zero_orientation;
+  boost::optional<Eigen::Vector3d> zero_RPY;
   boost::optional<Eigen::Isometry3d> gps_to_base;
   
   std::mutex gps_queue_mutex;

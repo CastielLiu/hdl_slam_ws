@@ -105,7 +105,8 @@ public:
    * @brief correct
    * @param measurement  measurement vector
    */
-  void correct(const VectorXt& measurement) {
+  void correct(const VectorXt& measurement) 
+  {
     // create extended state space which includes error variances
     VectorXt ext_mean_pred = VectorXt::Zero(N + K, 1);
     MatrixXt ext_cov_pred = MatrixXt::Zero(N + K, N + K);
@@ -118,24 +119,28 @@ public:
 
     // unscented transform
     expected_measurements.setZero();
-    for (int i = 0; i < ext_sigma_points.rows(); i++) {
+    for (int i = 0; i < ext_sigma_points.rows(); i++) 
+    {
       expected_measurements.row(i) = system.h(ext_sigma_points.row(i).transpose().topLeftCorner(N, 1));
       expected_measurements.row(i) += VectorXt(ext_sigma_points.row(i).transpose().bottomRightCorner(K, 1));
     }
 
     VectorXt expected_measurement_mean = VectorXt::Zero(K);
-    for (int i = 0; i < ext_sigma_points.rows(); i++) {
+    for (int i = 0; i < ext_sigma_points.rows(); i++) 
+    {
       expected_measurement_mean += ext_weights[i] * expected_measurements.row(i);
     }
     MatrixXt expected_measurement_cov = MatrixXt::Zero(K, K);
-    for (int i = 0; i < ext_sigma_points.rows(); i++) {
+    for (int i = 0; i < ext_sigma_points.rows(); i++) 
+    {
       VectorXt diff = expected_measurements.row(i).transpose() - expected_measurement_mean;
       expected_measurement_cov += ext_weights[i] * diff * diff.transpose();
     }
 
     // calculated transformed covariance
     MatrixXt sigma = MatrixXt::Zero(N + K, K);
-    for (int i = 0; i < ext_sigma_points.rows(); i++) {
+    for (int i = 0; i < ext_sigma_points.rows(); i++) 
+    {
       auto diffA = (ext_sigma_points.row(i).transpose() - ext_mean_pred);
       auto diffB = (expected_measurements.row(i).transpose() - expected_measurement_mean);
       sigma += ext_weights[i] * (diffA * diffB.transpose());

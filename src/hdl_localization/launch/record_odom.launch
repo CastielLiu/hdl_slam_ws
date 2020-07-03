@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<launch>
+ 
+	<node pkg="hdl_localization" type="record_gps_slam_odom_node" name="record_gps_slam_odom_node" output="screen">
+		<param name="gps_odom_topic" value="/gps_odom" />
+		<param name="slam_odom_topic" value="/odom" />
+		<param name="out_file_dir" value="$(find hdl_localization)/data/"/>
+		<param name="map_in_world_file" value="$(find hdl_localization)/data/map.pcd.utm"/>
+		
+	</node>
+    
+ </launch>

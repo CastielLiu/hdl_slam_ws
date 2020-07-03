@@ -12,7 +12,8 @@
 namespace hdl_graph_slam {
 
 boost::shared_ptr<pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>> 
-select_registration_method(ros::NodeHandle& pnh) {
+select_registration_method(ros::NodeHandle& pnh) 
+{
   using PointT = pcl::PointXYZI;
 
   // select a registration method (ICP, GICP, NDT)
@@ -38,13 +39,16 @@ select_registration_method(ros::NodeHandle& pnh) {
     }
 
     double ndt_resolution = pnh.param<double>("ndt_resolution", 0.5);
-    if(registration_method.find("OMP") == std::string::npos) {
+    if(registration_method.find("OMP") == std::string::npos) 
+    {
       std::cout << "registration: NDT " << ndt_resolution << std::endl;
       boost::shared_ptr<pcl::NormalDistributionsTransform<PointT, PointT>> ndt(new pcl::NormalDistributionsTransform<PointT, PointT>());
       ndt->setTransformationEpsilon(0.01);
       ndt->setResolution(ndt_resolution);
       return ndt;
-    } else {
+    } 
+    else 
+    {
       int num_threads = pnh.param<int>("ndt_num_threads", 0);
       std::string nn_search_method = pnh.param<std::string>("ndt_nn_search_method", "DIRECT7");
       std::cout << "registration: NDT_OMP " << nn_search_method << " " << ndt_resolution << " (" << num_threads << " threads)" << std::endl;
@@ -55,13 +59,12 @@ select_registration_method(ros::NodeHandle& pnh) {
       ndt->setTransformationEpsilon(0.01);
       ndt->setMaximumIterations(64);
       ndt->setResolution(ndt_resolution);
-      if(nn_search_method == "KDTREE") {
+      if(nn_search_method == "KDTREE")
         ndt->setNeighborhoodSearchMethod(pclomp::KDTREE);
-      } else if (nn_search_method == "DIRECT1") {
+      else if (nn_search_method == "DIRECT1") 
         ndt->setNeighborhoodSearchMethod(pclomp::DIRECT1);
-      } else {
+      else
         ndt->setNeighborhoodSearchMethod(pclomp::DIRECT7);
-      }
       return ndt;
     }
   }

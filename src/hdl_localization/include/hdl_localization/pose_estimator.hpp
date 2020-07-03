@@ -98,10 +98,13 @@ public:
     registration->align(*aligned, init_guess);
 
     Eigen::Matrix4f trans = registration->getFinalTransformation();
+    //std::cout << "ukf correct, cloud registration score: " << registration->getFitnessScore() << std::endl;
+    
     Eigen::Vector3f p = trans.block<3, 1>(0, 3);
     Eigen::Quaternionf q(trans.block<3, 3>(0, 0));
 
-    if(quat().coeffs().dot(q.coeffs()) < 0.0f) {
+    if(quat().coeffs().dot(q.coeffs()) < 0.0f) 
+    {
       q.coeffs() *= -1.0f;
     }
 

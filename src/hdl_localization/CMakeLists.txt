@@ -15,6 +15,8 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
   sensor_msgs
+  tf_conversions
+  eigen_conversions
   ndt_omp
 )
 
@@ -63,4 +65,9 @@ target_link_libraries(globalmap_server_nodelet
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
 )
+
+add_executable(record_gps_slam_odom_node  src/record_odom.cpp)
+add_dependencies(record_gps_slam_odom_node  ${catkin_EXPORTED_TARGETS})
+target_link_libraries(record_gps_slam_odom_node ${catkin_LIBRARIES} ${PCL_LIBRARIES})
+
 
