@@ -86,11 +86,11 @@ private:
     // publish the detected floor coefficients
     hdl_graph_slam::FloorCoeffs coeffs;
     coeffs.header = cloud_msg->header;
-    if(floor) {
+    if(floor) 
+    {
       coeffs.coeffs.resize(4);
-      for(int i=0; i<4; i++) {
+      for(int i=0; i<4; i++) 
         coeffs.coeffs[i] = (*floor)[i];
-      }
     }
 
     floor_pub.publish(coeffs);
@@ -109,9 +109,12 @@ private:
    * @brief detect the floor plane from a point cloud
    * @param cloud  input cloud
    * @return detected floor plane coefficients
+   * 利用平面模型进行地面检测，
+   * 利用上次地面的检测结果分割当前地面点范围
    */
   boost::optional<Eigen::Vector4f> detect(const pcl::PointCloud<PointT>::Ptr& cloud) const 
   {
+    static Eigen::Vector4f last_floor_coffs; static bool last_floor_coffs_valid = false;
 	pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>);
 	static Eigen::Matrix4f tilt_matrix;
 	if(use_tilt_compensate)  //补偿雷达安装倾斜角？点云降采样时已经根据雷达的安装位置将点云转换至base_link,再次补偿无益！
@@ -131,9 +134,18 @@ private:
     }
     else
     {
-    	//平面模型 Ax+By+Cz+D = 0
-		filtered = plane_clip(cloud, Eigen::Vector4f(0.0f, 0.0f, 1.0f, sensor_height + height_clip_range), false);
-		filtered = plane_clip(filtered, Eigen::Vector4f(0.0f, 0.0f, 1.0f, sensor_height - height_clip_range), true);
+        if(last_floor_coffs_valid)
+        {
+            filtered = plane_clip(cloud,   last_floor_coffs + Eigen::Vector4f(0, 0, 0, height_clip_range), false);
+			filtered = plane_clip(filtered,last_floor_coffs - Eigen::Vector4f(0, 0, 0, height_clip_range), true);
+        }
+        else
+        {
+		        //平面模型 Ax+By+Cz+D = 0
+			filtered = plane_clip(cloud, Eigen::Vector4f(0.0f, 0.0f, 1.0f, sensor_height + height_clip_range), false);
+			filtered = plane_clip(filtered, Eigen::Vector4f(0.0f, 0.0f, 1.0f, sensor_height - height_clip_range), true);
+        }
+    	
     }
 
     if(use_normal_filtering)  
@@ -172,12 +184,15 @@ private:
     static float threshold = std::cos(floor_normal_thresh * M_PI / 180.0);
     //判断平面法线与z轴夹角，超出阈值则认为非法平面
     //cos(theta) = v1*v2/(|v1||v2|) => v1[2]
-    if(coeffs[2] < threshold) {
+    if(coeffs[2] < threshold) 
+    {
+      last_floor_coffs_valid = false;
       // the normal is not vertical
       return boost::none;
     }
 
-    if(floor_points_pub.getNumSubscribers()) {
+    if(floor_points_pub.getNumSubscribers()) 
+    {
       pcl::PointCloud<PointT>::Ptr inlier_cloud(new pcl::PointCloud<PointT>);
       pcl::ExtractIndices<PointT> extract;
       extract.setInputCloud(filtered);
@@ -188,7 +203,8 @@ private:
       floor_points_pub.publish(inlier_cloud);
     }
     
-    if(floor_filtered_pub.getNumSubscribers()) {
+    if(floor_filtered_pub.getNumSubscribers()) 
+    {
     	pcl::PointCloud<PointT>::Ptr inlier_cloud(new pcl::PointCloud<PointT>);
     	inlier_cloud->header = cloud->header;
     	inlier_cloud->reserve(cloud->size());
@@ -202,8 +218,9 @@ private:
 		//std::cout << inlier_cloud->size() << std::endl;
 		floor_filtered_pub.publish(inlier_cloud);
     }
-    
-    return Eigen::Vector4f(coeffs);
+    last_floor_coffs_valid = true;
+    last_floor_coffs = Eigen::Vector4f(coeffs);
+    return last_floor_coffs;
   }
 
   /**

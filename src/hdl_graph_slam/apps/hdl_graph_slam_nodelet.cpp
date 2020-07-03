@@ -119,6 +119,7 @@ public:
     gps_edge_stddev_z = private_nh.param<double>("gps_edge_stddev_z", 10.0);
     
     //floor
+    use_floor_edge = private_nh.param<bool>("use_floor_edge", true);
     floor_edge_stddev = private_nh.param<double>("floor_edge_stddev", 10.0);
     
     //utm
@@ -267,13 +268,26 @@ private:
       
       gps_to_base = _gps_to_base_;
     }
+//    Eigen::Matrix3d gps_rot_matrix = gps_ori.matrix();  //gps在世界坐标系下的旋转矩阵
+//    Eigen::Matrix3d base_rot_matrix = (*gps_to_base).linear() * gps_rot_matrix; //base_link在世界坐标系下的旋转矩阵
+//    static Eigen::Matrix3d origin_base_rot_matrix_inv = base_rot_matrix.inverse();//base_link位于地图原点时，在世界坐标系下的旋转矩阵，的逆
+//    
+//    Eigen::Quaterniond result(origin_base_rot_matrix_inv * base_rot_matrix); //base_link在地图map坐标系下的旋转矩阵
+//    
+//    std::cout << "*********** gps yaw: " << utm_odom_msg->pose.covariance[3]*180.0/M_PI << std::endl;
+//    std::cout << "*********** gps ZYX: " << gps_ori.matrix().eulerAngles(2,1,0).transpose() *180.0/M_PI  << "***********"<< std::endl;
+//    std::cout << "*********** base_ori: " << result.matrix().eulerAngles(2,1,0).transpose() *180.0/M_PI  << "***********"<< std::endl;
+    Eigen::AngleAxisd yawAngle(Eigen::AngleAxisd(utm_odom_msg->pose.covariance[3],Eigen::Vector3d::UnitZ()));
+    Eigen::AngleAxisd rollAngle(Eigen::AngleAxisd(utm_odom_msg->pose.covariance[4],Eigen::Vector3d::UnitY()));
+	Eigen::AngleAxisd pitchAngle(Eigen::AngleAxisd(utm_odom_msg->pose.covariance[5],Eigen::Vector3d::UnitX()));
+	Eigen::Matrix3d gps_rot_matrix; gps_rot_matrix = yawAngle*rollAngle*pitchAngle;
+	Eigen::Matrix3d base_rot_matrix = (*gps_to_base).linear() * gps_rot_matrix;
+	static Eigen::Matrix3d origin_base_rot_matrix_inv = base_rot_matrix.inverse();
+	Eigen::Quaterniond result(origin_base_rot_matrix_inv * base_rot_matrix);
+	
+    std::cout << "*********** gps yaw: " << utm_odom_msg->pose.covariance[3]*180.0/M_PI << std::endl;
+    std::cout << "*********** base_ori: " << result.matrix().eulerAngles(2,1,0).transpose() *180.0/M_PI  << "***********"<< std::endl;
     
-    static Eigen::Quaterniond gps_to_base_quat((*gps_to_base).linear());
-    
-    Eigen::Quaterniond result = gps_to_base_quat * gps_ori;
-    
-    std::cout << "imu_ori: " << gps_ori.matrix().eulerAngles(2,1,0) *180.0/M_PI << std::endl;
-    std::cout << "base_ori: " << result.matrix().eulerAngles(2,1,0) *180.0/M_PI << std::endl;
     
     return result;
   }
@@ -287,7 +301,7 @@ private:
   void cloud_callback(const nav_msgs::OdometryConstPtr& odom_msg,
 					  const sensor_msgs::PointCloud2::ConstPtr& cloud_msg) 
   {
-	ROS_INFO("slam received a pointcloud");
+	//ROS_INFO("slam received a pointcloud");
 
     Eigen::Isometry3d odom;
     if(use_gps_instead_lidar_odom)
@@ -614,7 +628,9 @@ private:
         keyframe->orientation = get_orientation_by_gps(*closest_utm);
         if(keyframe->orientation->w() < 0.0)
            keyframe->orientation->coeffs() = -keyframe->orientation->coeffs();
-        Eigen::MatrixXd info = Eigen::MatrixXd::Identity(3, 3) / imu_orientation_edge_stddev;
+        Eigen::MatrixXd info = Eigen::MatrixXd::Identity(3, 3) / imu_orientation_edge_stddev; //yaw roll pitch
+        //info(0,0) = info(1,1) = info(2,2) = 0.01;  //弱化权重
+        
         auto edge = graph_slam->add_se3_prior_quat_edge(keyframe->node, *keyframe->orientation, info);
         graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("imu_orientation_edge_robust_kernel", "NONE"), 
         									private_nh.param<double>("imu_orientation_edge_robust_kernel_size", 1.0));
@@ -738,10 +754,10 @@ private:
    * @brief received floor coefficients are added to #floor_coeffs_queue
    * @param floor_coeffs_msg
    */
-  void floor_coeffs_callback(const hdl_graph_slam::FloorCoeffsConstPtr& floor_coeffs_msg) {
-    if(floor_coeffs_msg->coeffs.empty()) {
+  void floor_coeffs_callback(const hdl_graph_slam::FloorCoeffsConstPtr& floor_coeffs_msg) 
+  {
+    if(floor_coeffs_msg->coeffs.empty()) 
       return;
-    }
 
     std::lock_guard<std::mutex> lock(floor_coeffs_queue_mutex);
     floor_coeffs_queue.push_back(floor_coeffs_msg);
@@ -753,6 +769,9 @@ private:
    */
   bool flush_floor_queue() 
   {
+    if(!use_floor_edge)
+        return true;
+        
     std::lock_guard<std::mutex> lock(floor_coeffs_queue_mutex);
 
     if(keyframes.empty()) 
@@ -833,13 +852,15 @@ private:
    * @brief this methods adds all the data in the queues to the pose graph, and then optimizes the pose graph
    * @param event
    */
-  void optimization_timer_callback(const ros::WallTimerEvent& event) {
+  void optimization_timer_callback(const ros::WallTimerEvent& event) 
+  {
     std::lock_guard<std::mutex> lock(main_thread_mutex);
 
     // add keyframes and floor coeffs in the queues to the pose graph
     bool keyframe_updated = flush_keyframe_queue();
 
-    if(!keyframe_updated) {
+    if(!keyframe_updated) 
+    {
       std_msgs::Header read_until;
       read_until.stamp = ros::Time::now() + ros::Duration(30, 0);
       read_until.frame_id = points_topic;
@@ -1299,6 +1320,7 @@ private:
   std::deque<sensor_msgs::ImuConstPtr> imu_queue;
 
   // floor_coeffs queue
+  bool use_floor_edge;
   double floor_edge_stddev;
   std::mutex floor_coeffs_queue_mutex;
   std::deque<hdl_graph_slam::FloorCoeffsConstPtr> floor_coeffs_queue;
