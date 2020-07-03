@@ -183,7 +183,7 @@ public:
 		Eigen::Matrix3d matrix      = odom.linear();
 		of_gps_odom_ << std::fixed << std::setprecision(3)
 					 << translation(0) << "\t" << translation(1) << "\t" 
-					 << matrix.eulerAngles(2,1,0)[0] << "\t" << odom_msg->twist.twist.linear.x << "\r\n";
+					 << matrix.eulerAngles(2,1,0)[0]*180.0/M_PI << "\t" << odom_msg->twist.twist.linear.x << "\r\n";
 		of_gps_odom_.flush();
 	}
 	
@@ -195,7 +195,7 @@ public:
 		
 		of_slam_odom_ << std::fixed << std::setprecision(3)
 					  << odom_msg->pose.pose.position.x << "\t" << odom_msg->pose.pose.position.y << "\t" 
-					  << ori.matrix().eulerAngles(2,1,0)[0] << "\t" << odom_msg->twist.twist.linear.x  << "\r\n";
+					  << ori.matrix().eulerAngles(2,1,0)[0]*180.0/M_PI << "\t" << odom_msg->twist.twist.linear.x  << "\r\n";
 		of_slam_odom_.flush();
 	}
 
