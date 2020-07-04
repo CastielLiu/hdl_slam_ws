@@ -31,14 +31,16 @@ public:
 		std::string slam_odom_topic = nh_private.param<std::string>("slam_odom_topic","/slam_odom");
 		sub_slam_odom_ = nh.subscribe(slam_odom_topic,10,&OdomRecorder::slam_odom_callback, this);
 		
-		std::string out_file_dir = nh_private.param<std::string>("out_file_dir","");
-		if(out_file_dir.empty())
+		std::string out_file_prefix = nh_private.param<std::string>("out_file_prefix","");
+		if(out_file_prefix.empty())
 		{
-			ROS_ERROR("[%s] please set out_file_dir int launch file!", __NAME__);
+			ROS_ERROR("[%s] please set out_file_prefix int launch file!", __NAME__);
 			return false;
 		}
-		std::string gps_odom_file = out_file_dir + "/gps_odom.txt";
-		std::string slam_odom_file = out_file_dir + "/slam_odom.txt";
+		out_file_prefix = out_file_prefix.substr(0,out_file_prefix.find_first_of('.'));
+		
+		std::string gps_odom_file = out_file_prefix + "_gps_odom.txt";
+		std::string slam_odom_file = out_file_prefix + "_slam_odom.txt";
 		of_gps_odom_.open(gps_odom_file);
 		if(!of_gps_odom_.is_open())
 		{
@@ -86,8 +88,8 @@ public:
 		double x,y,z, roll,pitch,yaw;
 		std::stringstream ss(line);
 		ss >> x >> y >> z >> roll >> pitch >>  yaw;
-		std::cout << std::fixed << std::setprecision(3) 
-			<< x << "\t" << y << "\t" << z << "\t" << roll << "\t" << pitch << "\t" <<  yaw << std::endl;
+//		std::cout << std::fixed << std::setprecision(3) 
+//			<< x << "\t" << y << "\t" << z << "\t" << roll << "\t" << pitch << "\t" <<  yaw << std::endl;
 		in_file.close();
 		Eigen::AngleAxisd rollAngle(Eigen::AngleAxisd(deg2rad(roll),Eigen::Vector3d::UnitY()));
 		Eigen::AngleAxisd pitchAngle(Eigen::AngleAxisd(deg2rad(pitch),Eigen::Vector3d::UnitX()));
@@ -96,13 +98,13 @@ public:
 		Eigen::Matrix3d rotation_matrix;
 		rotation_matrix=yawAngle*pitchAngle*rollAngle;
 		
-		std::cout << std::fixed << std::setprecision(3) << rotation_matrix << std::endl;
+//		std::cout << std::fixed << std::setprecision(3) << rotation_matrix << std::endl;
 		
 		map_in_world_ = Eigen::Isometry3d::Identity();
 		map_in_world_.rotate(rotation_matrix); 
 		map_in_world_.pretranslate(Eigen::Vector3d(x,y,0)); 
-		std::cout << std::fixed << std::setprecision(3) << map_in_world_.linear() << std::endl;
-		std::cout << std::fixed << std::setprecision(3) << map_in_world_.translation() << std::endl;
+//		std::cout << std::fixed << std::setprecision(3) << map_in_world_.linear() << std::endl;
+//		std::cout << std::fixed << std::setprecision(3) << map_in_world_.translation() << std::endl;
 		return true;
 	}
 	
@@ -138,10 +140,10 @@ public:
 
 			tf::transformTFToEigen(tf_gps2base, gps_to_base);
 			
-			std::cout << "gps_to_base: " << std::endl;
-			std::cout << std::fixed << std::setprecision(3) << gps_to_base.translation() << std::endl;
-			std::cout << std::fixed << std::setprecision(3) << gps_to_base.linear() << std::endl;
-			std::cout << std::fixed << std::setprecision(3) << gps_to_base.linear().eulerAngles(2,1,0).transpose() << std::endl;
+//			std::cout << "gps_to_base: " << std::endl;
+//			std::cout << std::fixed << std::setprecision(3) << gps_to_base.translation() << std::endl;
+//			std::cout << std::fixed << std::setprecision(3) << gps_to_base.linear() << std::endl;
+//			std::cout << std::fixed << std::setprecision(3) << gps_to_base.linear().eulerAngles(2,1,0).transpose() << std::endl;
 
 			parsed = true;
 		}
@@ -149,13 +151,13 @@ public:
 		Eigen::Isometry3d gps_in_world = odom2isometry(odom);
 		Eigen::Isometry3d base_in_world = gps_in_world * gps_to_base;
 		
-		std::cout << "gps_in_world: " << std::endl;
-		std::cout << std::fixed << std::setprecision(3) << gps_in_world.translation() << std::endl;
-		
-		std::cout << "base_in_world: " << std::endl;
-		std::cout << std::fixed << std::setprecision(3) << base_in_world.translation() << std::endl;
+//		std::cout << "gps_in_world: " << std::endl;
+//		std::cout << std::fixed << std::setprecision(3) << gps_in_world.translation() << std::endl;
+//		
+//		std::cout << "base_in_world: " << std::endl;
+//		std::cout << std::fixed << std::setprecision(3) << base_in_world.translation() << std::endl;
 
-		return map_in_world_.inverse() * base_in_world;
+		return map_in_world_.inverse() * base_in_world; //base_in_map
 	}
 	
 	Eigen::Isometry3d odom2isometry(const nav_msgs::Odometry& odom) 
@@ -181,9 +183,19 @@ public:
 		
 		Eigen::Vector3d translation = odom.translation();
 		Eigen::Matrix3d matrix      = odom.linear();
+		
+		float north_velocity = odom_msg->pose.covariance[6];
+		float east_velocity  = odom_msg->pose.covariance[7];
+		float yaw            = odom_msg->pose.covariance[0]*180.0/M_PI;
+		//std::cout << "n e speed: " << north_velocity << "\t" << east_velocity << "\t" << yaw << std::endl;
+		float speed = north_velocity*cos(odom_msg->pose.covariance[0]) + east_velocity*sin(odom_msg->pose.covariance[0]);
+		//std::cout << "speed: " << speed << std::endl;
+		
 		of_gps_odom_ << std::fixed << std::setprecision(3)
 					 << translation(0) << "\t" << translation(1) << "\t" 
-					 << matrix.eulerAngles(2,1,0)[0]*180.0/M_PI << "\t" << odom_msg->twist.twist.linear.x << "\r\n";
+					 << matrix.eulerAngles(2,1,0)[0]*180.0/M_PI << "\t" << speed << "\r\n";
+					 
+					 //odom_msg->twist.twist.linear.x
 		of_gps_odom_.flush();
 	}
 	

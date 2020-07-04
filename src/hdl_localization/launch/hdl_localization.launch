@@ -1,17 +1,23 @@
 <?xml version="1.0"?>
 <launch>
   <!-- arguments -->
+  <arg name="map" />
   <arg name="nodelet_manager" default="slam_nodelet_manager" />
-  
   <arg name="imu_topic" default="/gpsimu_driver/imu_data" />
   <arg name="odom_child_frame_id" default="base_link" />
   <arg name="raw_points_topic" default="/pandar_points" />
+  
   
   <param name="use_sim_time" value="true"/>
   <node pkg="rviz" type="rviz" name="slam_rviz" args="-d $(find hdl_localization)/rviz/hdl_localization.rviz"/>
   
   <node pkg="tf" type="static_transform_publisher" name="lidar_frame_publisher" args="0 0 0.81 1.5707963 0 0    base_link pandar 100" />
   <node pkg="tf" type="static_transform_publisher" name="gps_frame_publisher"   args="-0.5 0 0 -1.5707963 0 0   base_link gps 100" />
+  
+  <include file="$(find hdl_localization)/launch/record_odom.launch">
+      <arg name="map_in_world" value="$(arg map).utm"/>
+      <arg name="out_file_prefix" value="$(arg map)"/>
+  </include>
   
   <!-- in case you use velodyne_driver, comment out the following line -->
   <node pkg="nodelet" type="nodelet" name="$(arg nodelet_manager)" args="manager" output="screen"/>
@@ -52,7 +58,9 @@
   
     <!-- globalmap_server_nodelet -->
     <node pkg="nodelet" type="nodelet" name="globalmap_server_nodelet" args="load hdl_localization/GlobalmapServerNodelet $(arg nodelet_manager)">
-      <param name="globalmap_pcd" value="$(find hdl_localization)/data/map.pcd" />
+      <!-- param name="globalmap_pcd" value="$(find hdl_localization)/data/2020-07-04-15-08-01.pcd" /-->
+      <param name="globalmap_pcd" value="$(arg map)"/>
+      
       <param name="downsample_resolution" value="0.1" />
     </node>
 

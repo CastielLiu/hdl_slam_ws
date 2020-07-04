@@ -7,7 +7,7 @@
   <arg name="enable_utm" default="true" />
   <arg name="use_match_odom" default="true" />
   <arg name="enable_imu_acc" default="false" />
-  <arg name="enable_imu_ori" default="true" />
+  <arg name="enable_imu_ori" default="false" />
   <arg name="raw_points_topic" default="/pandar_points" />
   
   <param name="use_sim_time" value="true"/>
