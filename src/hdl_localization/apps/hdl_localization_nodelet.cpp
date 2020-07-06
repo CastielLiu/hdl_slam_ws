@@ -24,19 +24,23 @@
 #include <hdl_localization/pose_estimator.hpp>
 
 
-namespace hdl_localization {
+namespace hdl_localization 
+{
 
-class HdlLocalizationNodelet : public nodelet::Nodelet {
+class HdlLocalizationNodelet : public nodelet::Nodelet 
+{
 public:
   using PointT = pcl::PointXYZI;
 
-  HdlLocalizationNodelet() {
+  HdlLocalizationNodelet() 
+  {
   }
-  virtual ~HdlLocalizationNodelet() {
+  virtual ~HdlLocalizationNodelet() 
+  {
   }
 
-
-  void onInit() override {
+  void onInit() override 
+  {
     nh = getNodeHandle();
     mt_nh = getMTNodeHandle();
     private_nh = getPrivateNodeHandle();
@@ -48,7 +52,7 @@ public:
 
     use_imu = private_nh.param<bool>("use_imu", true);
     invert_imu = private_nh.param<bool>("invert_imu", false);
-    if(use_imu) 
+    if(use_imu)
     {
       NODELET_INFO("enable imu-based prediction");
       imu_sub = mt_nh.subscribe("/gpsimu_driver/imu_data", 256, &HdlLocalizationNodelet::imu_callback, this);
@@ -124,7 +128,8 @@ private:
    * @brief callback for imu data
    * @param imu_msg
    */
-  void imu_callback(const sensor_msgs::ImuConstPtr& imu_msg) {
+  void imu_callback(const sensor_msgs::ImuConstPtr& imu_msg) 
+  {
     std::lock_guard<std::mutex> lock(imu_data_mutex);
     imu_data.push_back(imu_msg);
   }
@@ -159,22 +164,23 @@ private:
     }
 
     // transform pointcloud into odom_child_frame_id  
+    // 将点云转换到odom_child_frame_id下(如果当前不是)
     pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
     if(points_msg->header.frame_id != odom_child_frame_id)
     {
        if(!pcl_ros::transformPointCloud(odom_child_frame_id, *pcl_cloud, *cloud, this->tf_listener)) 
        {
-        NODELET_ERROR("point cloud cannot be transformed into target frame!!");
-        return;
-       } 
+          NODELET_ERROR("point cloud cannot be transformed into target frame!!");
+          return;
+       }
     }
     else
       cloud = pcl_cloud;
 
     pcl::PointCloud<PointT>::ConstPtr filtered = downsample(cloud);
 
-    // predict
-    if(!use_imu) 
+    // 预测
+    if(!use_imu)
       pose_estimator->predict(stamp, Eigen::Vector3f::Zero(), Eigen::Vector3f::Zero());
     else 
     {

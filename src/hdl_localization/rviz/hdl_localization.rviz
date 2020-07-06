@@ -7,6 +7,7 @@ Panels:
         - /Global Options1
         - /Status1
         - /PointCloud21
+        - /Odometry1
         - /MarkerArray1/Namespaces1
       Splitter Ratio: 0.5
     Tree Height: 695
@@ -59,7 +60,11 @@ Visualization Manager:
         All Enabled: true
         base_link:
           Value: true
+        gps:
+          Value: true
         map:
+          Value: true
+        pandar:
           Value: true
       Marker Scale: 4
       Name: TF
@@ -69,7 +74,10 @@ Visualization Manager:
       Tree:
         map:
           base_link:
-            {}
+            gps:
+              {}
+            pandar:
+              {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -82,7 +90,7 @@ Visualization Manager:
       Channel Name: intensity
       Class: rviz/PointCloud2
       Color: 255; 255; 255
-      Color Transformer: Intensity
+      Color Transformer: FlatColor
       Decay Time: 0
       Enabled: true
       Invert Rainbow: false
@@ -117,9 +125,9 @@ Visualization Manager:
       Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 5.22875023
+      Max Intensity: 8.20243549
       Min Color: 0; 0; 0
-      Min Intensity: -1.77124989
+      Min Intensity: -1.89756489
       Name: PointCloud2
       Position Transformer: XYZ
       Queue Size: 10
@@ -147,7 +155,7 @@ Visualization Manager:
       Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 255
+      Max Intensity: 71
       Min Color: 0; 255; 0
       Min Intensity: 0
       Name: PointCloud2
@@ -180,18 +188,18 @@ Visualization Manager:
           Value: true
         Value: true
       Enabled: true
-      Keep: 100
+      Keep: 5000
       Name: Odometry
       Position Tolerance: 0.100000001
       Shape:
         Alpha: 1
         Axes Length: 1
         Axes Radius: 0.100000001
-        Color: 255; 25; 0
+        Color: 255; 0; 127
         Head Length: 0.300000012
-        Head Radius: 0.100000001
+        Head Radius: 0.5
         Shaft Length: 1
-        Shaft Radius: 0.0500000007
+        Shaft Radius: 0.800000012
         Value: Arrow
       Topic: /odom
       Unreliable: false
@@ -297,25 +305,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 172.036179
+      Distance: 146.40918
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.0599999987
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 49.9852676
-        Y: -19.4098358
-        Z: 1.13471937
+        X: -28.4364433
+        Y: 97.7695923
+        Z: 111.009804
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.0500000007
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.00999999978
-      Pitch: 1.01979649
+      Pitch: 0.849796534
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 3.69982266
+      Yaw: 2.58664608
     Saved: ~
 Window Geometry:
   Displays:

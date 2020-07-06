@@ -8,7 +8,6 @@
 
 #include <fstream>
 
-
 #define __NAME__ "record_odom_node"
 
 class OdomRecorder
@@ -57,9 +56,14 @@ public:
 		return load_map_in_world();
 	}
 	
-	inline double deg2rad(double & deg)
+	inline double deg2rad(double deg)
 	{
 		return deg/180.0*M_PI;
+	}
+	
+	inline double rad2deg(double rad)
+	{
+		return rad*180.0/M_PI;
 	}
 	
 	bool load_map_in_world()
@@ -88,15 +92,17 @@ public:
 		double x,y,z, roll,pitch,yaw;
 		std::stringstream ss(line);
 		ss >> x >> y >> z >> roll >> pitch >>  yaw;
+
 //		std::cout << std::fixed << std::setprecision(3) 
 //			<< x << "\t" << y << "\t" << z << "\t" << roll << "\t" << pitch << "\t" <<  yaw << std::endl;
 		in_file.close();
-		Eigen::AngleAxisd rollAngle(Eigen::AngleAxisd(deg2rad(roll),Eigen::Vector3d::UnitY()));
-		Eigen::AngleAxisd pitchAngle(Eigen::AngleAxisd(deg2rad(pitch),Eigen::Vector3d::UnitX()));
-		Eigen::AngleAxisd yawAngle(Eigen::AngleAxisd(deg2rad(yaw),Eigen::Vector3d::UnitZ()));
+		
+		Eigen::AngleAxisd xAngle(Eigen::AngleAxisd(deg2rad(pitch),Eigen::Vector3d::UnitX()));
+		Eigen::AngleAxisd yAngle(Eigen::AngleAxisd(deg2rad(roll),Eigen::Vector3d::UnitY()));
+		Eigen::AngleAxisd zAngle(Eigen::AngleAxisd(deg2rad(yaw),Eigen::Vector3d::UnitZ()));
 		 
 		Eigen::Matrix3d rotation_matrix;
-		rotation_matrix=yawAngle*pitchAngle*rollAngle;
+		rotation_matrix=zAngle*yAngle*xAngle;
 		
 //		std::cout << std::fixed << std::setprecision(3) << rotation_matrix << std::endl;
 		
@@ -191,9 +197,13 @@ public:
 		float speed = north_velocity*cos(odom_msg->pose.covariance[0]) + east_velocity*sin(odom_msg->pose.covariance[0]);
 		//std::cout << "speed: " << speed << std::endl;
 		
+		Eigen::Vector3d euler = matrix2Euler(matrix);
+		float yaw_angle = euler[2] + M_PI/2;
+		if(yaw_angle < 0) yaw_angle+= M_PI * 2; //将-180->180 转为0-360.0
+		
 		of_gps_odom_ << std::fixed << std::setprecision(3)
 					 << translation(0) << "\t" << translation(1) << "\t" 
-					 << matrix.eulerAngles(2,1,0)[0]*180.0/M_PI << "\t" << speed << "\r\n";
+					 << yaw_angle*180.0/M_PI << "\t" << speed << "\r\n";
 					 
 					 //odom_msg->twist.twist.linear.x
 		of_gps_odom_.flush();
@@ -205,10 +215,137 @@ public:
 		Eigen::Quaterniond ori(ori_msg.w, ori_msg.x, ori_msg.y, ori_msg.z);
 		ori.normalize();
 		
+		Eigen::Vector3d euler = quaternion2Euler(ori);
+		float yaw_angle = euler[2];
+		
+		if(yaw_angle < 0) yaw_angle+= M_PI * 2; //将-180->180 转为0-360.0
+		float x_speed = odom_msg->twist.twist.linear.x;
+		float y_speed = odom_msg->twist.twist.linear.y;
+		float speed = sqrt(x_speed*x_speed + y_speed*y_speed);
+		
 		of_slam_odom_ << std::fixed << std::setprecision(3)
 					  << odom_msg->pose.pose.position.x << "\t" << odom_msg->pose.pose.position.y << "\t" 
-					  << ori.matrix().eulerAngles(2,1,0)[0]*180.0/M_PI << "\t" << odom_msg->twist.twist.linear.x  << "\r\n";
+					  << yaw_angle*180.0/M_PI << "\t" << speed << "\r\n";
+//		std::cout << std::fixed << std::setprecision(2);
+//		std::cout << odom_msg->twist.twist.linear.x << "\t" << odom_msg->twist.twist.linear.y << "\t" << odom_msg->twist.twist.linear.z<< std::endl;
 		of_slam_odom_.flush();
+	}
+	
+	Eigen::Quaterniond euler2Quaternion(double x_angle, double y_angle, double z_angle)
+	{
+		Eigen::AngleAxisd xAngle(x_angle, Eigen::Vector3d::UnitX());
+		Eigen::AngleAxisd yAngle(y_angle, Eigen::Vector3d::UnitY());
+		Eigen::AngleAxisd zAngle(z_angle, Eigen::Vector3d::UnitZ());
+		
+		Eigen::Quaterniond q = zAngle * yAngle * xAngle;
+
+		return q.normalized();
+	}
+	
+	Eigen::Vector3d quaternion2Euler(const Eigen::Quaterniond& quat)
+	{
+		Eigen::Vector3d angles = quat.matrix().eulerAngles(2,1,0);
+		double x_angle = angles[2];
+		double y_angle = angles[1];
+		double z_angle = angles[0];
+		
+		if(y_angle < -M_PI/2 || y_angle > M_PI/2)
+		{
+			x_angle += M_PI;
+			if(x_angle < -M_PI)      x_angle += 2*M_PI;
+			else if(x_angle > M_PI)  x_angle -= 2*M_PI;
+		
+			y_angle = M_PI - y_angle;
+			if(y_angle > M_PI) y_angle -= 2*M_PI;
+			
+			z_angle -= M_PI;
+		}
+		
+		return Eigen::Vector3d(x_angle,y_angle,z_angle);
+	}
+	
+	Eigen::Vector3d matrix2Euler(const Eigen::Matrix3d& matrix)
+	{
+		Eigen::Vector3d angles = matrix.eulerAngles(2,1,0);
+		double x_angle = angles[2];
+		double y_angle = angles[1];
+		double z_angle = angles[0];
+		
+		if(y_angle < -M_PI/2 || y_angle > M_PI/2)
+		{
+			x_angle += M_PI;
+			if(x_angle < -M_PI)      x_angle += 2*M_PI;
+			else if(x_angle > M_PI)  x_angle -= 2*M_PI;
+		
+			y_angle = M_PI - y_angle;
+			if(y_angle > M_PI) y_angle -= 2*M_PI;
+			
+			z_angle -= M_PI;
+		}
+		
+		return Eigen::Vector3d(x_angle,y_angle,z_angle);
+	}
+	
+	
+	void broadcastTf(float roll,float pitch, float yaw)
+	{
+		Eigen::Quaterniond quat = euler2Quaternion(deg2rad(roll),deg2rad(pitch),deg2rad(yaw));
+	
+		Eigen::Vector3d angles = quaternion2Euler(quat);
+		float x_angle = rad2deg(angles[0]);
+		float y_angle = rad2deg(angles[1]);
+		float z_angle = rad2deg(angles[2]);
+
+		std::cout << std::fixed << std::setprecision(2);
+
+		if(int(roll)!=int(x_angle) || int(pitch)!=int(y_angle) || int(yaw)!=int(z_angle))
+		{
+			std::cout << roll  << "\t" << pitch << "\t" << yaw << std::endl;
+			std::cout << x_angle  << "\t" << y_angle << "\t" << z_angle << "\t" << std::endl;
+		}
+		else
+		{
+			std::cout << "." ;
+		}
+		
+
+		geometry_msgs::Quaternion odom_quat;
+		odom_quat.w = quat.w();
+		odom_quat.x = quat.x();
+		odom_quat.y = quat.y();
+		odom_quat.z = quat.z();
+
+		geometry_msgs::TransformStamped odom_trans;
+		odom_trans.header.stamp = ros::Time::now();
+		odom_trans.header.frame_id = "world";
+		odom_trans.child_frame_id = "gps";
+
+		odom_trans.transform.translation.x = 0;
+		odom_trans.transform.translation.y = 0;
+		odom_trans.transform.translation.z = 0;
+		odom_trans.transform.rotation = odom_quat;
+		tf_broadcaster_.sendTransform(odom_trans);
+	}
+	
+	void testQuaternoin()
+	{
+		ROS_INFO("testQuaternoin start.");
+		double start1 = -45.0 , end1 = 45.0;
+		double increment = 5;
+		for(double x_angle=start1; x_angle<=end1 && ros::ok(); x_angle+=increment)
+		{
+			double start2 = -45.0 , end2 = 45.0;
+			for(double y_angle=start2; y_angle<=end2 && ros::ok() ; y_angle+=increment)
+			{
+				double start3 = -180.0, end3 = 180;
+				for(double z_angle=start3; z_angle<=end3 && ros::ok(); z_angle+=increment)
+				{
+					broadcastTf(x_angle,y_angle,z_angle);
+				}
+			}
+		}
+		
+		ROS_INFO("testQuaternoin stop.");
 	}
 
 private:
@@ -218,6 +355,7 @@ private:
 	std::ofstream of_slam_odom_;
 	Eigen::Isometry3d map_in_world_;
 	tf::TransformListener tf_listener_;
+	tf::TransformBroadcaster tf_broadcaster_;
 };
 
 int main(int argc, char **argv)
@@ -225,7 +363,11 @@ int main(int argc, char **argv)
 	ros::init(argc,argv, "record_odom_node");
 	OdomRecorder recorder;
 	if(recorder.init())
+	{
+		//recorder.testQuaternoin();
 		ros::spin();
+	}
+		
 	
 	return true;
 }
