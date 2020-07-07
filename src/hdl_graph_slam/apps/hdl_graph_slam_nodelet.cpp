@@ -203,27 +203,29 @@ private:
           ROS_INFO("gps odom child frame id is empty, set to gps");
       }
       
-      tf::StampedTransform tf_gps2base;
+      tf::StampedTransform tf_gps_in_base;
       try
       {
         tf_listener.waitForTransform(base_frame_id ,gps_frame_id, ros::Time(0), ros::Duration(1.0));
-        tf_listener.lookupTransform(base_frame_id , gps_frame_id, ros::Time(0), tf_gps2base);
+        tf_listener.lookupTransform(base_frame_id , gps_frame_id, ros::Time(0), tf_gps_in_base);
       } 
       catch (std::exception& e) 
       {
         std::cerr << "failed to find the transform from [" << base_frame_id << "] to [" << utm_odom_msg->child_frame_id << "]!!" << std::endl;
         return Eigen::Isometry3d::Identity();
       }
-      //tf::transformTFToEigen(tf_gps2base.inverse(), gps_in_base);
       
-      Eigen::Isometry3d _gps_to_base_;
-      tf::transformTFToEigen(tf_gps2base, _gps_to_base_);
+      Eigen::Isometry3d _gps_to_base;
+      tf::transformTFToEigen(tf_gps_in_base.inverse(), _gps_to_base);
       
-      gps_to_base = _gps_to_base_;
+      gps_to_base = _gps_to_base;
     }
     //由gps定位点与gps在base_link的安装位置,求base_link的大地坐标
     Eigen::Isometry3d gps_in_world = odom2isometry(odom);
-    Eigen::Isometry3d base_in_world = (*gps_to_base) * gps_in_world;
+    Eigen::Isometry3d base_in_world =  gps_in_world * (*gps_to_base);
+    
+//    std::cout << "gps_in_world : " << gps_in_world.translation().transpose() << std::endl;
+//    std::cout << "base_in_world : " << base_in_world.translation().transpose() << std::endl;
     
     //地图原点在大地坐标系下的位置
     if(!map_in_world)
@@ -234,6 +236,8 @@ private:
     //base_in_map -> local_odom
     return map_in_world_reverse * base_in_world;
   }
+  
+  
   
   Eigen::Quaterniond get_orientation_by_gps(const nav_msgs::OdometryConstPtr& utm_odom_msg)
   {
@@ -268,27 +272,12 @@ private:
       
       gps_to_base = _gps_to_base_;
     }
-//    Eigen::Matrix3d gps_rot_matrix = gps_ori.matrix();  //gps在世界坐标系下的旋转矩阵
-//    Eigen::Matrix3d base_rot_matrix = (*gps_to_base).linear() * gps_rot_matrix; //base_link在世界坐标系下的旋转矩阵
-//    static Eigen::Matrix3d origin_base_rot_matrix_inv = base_rot_matrix.inverse();//base_link位于地图原点时，在世界坐标系下的旋转矩阵，的逆
-//    
-//    Eigen::Quaterniond result(origin_base_rot_matrix_inv * base_rot_matrix); //base_link在地图map坐标系下的旋转矩阵
-//    
-//    std::cout << "*********** gps yaw: " << utm_odom_msg->pose.covariance[3]*180.0/M_PI << std::endl;
-//    std::cout << "*********** gps ZYX: " << gps_ori.matrix().eulerAngles(2,1,0).transpose() *180.0/M_PI  << "***********"<< std::endl;
-//    std::cout << "*********** base_ori: " << result.matrix().eulerAngles(2,1,0).transpose() *180.0/M_PI  << "***********"<< std::endl;
-    Eigen::AngleAxisd yawAngle(Eigen::AngleAxisd(utm_odom_msg->pose.covariance[3],Eigen::Vector3d::UnitZ()));
-    Eigen::AngleAxisd rollAngle(Eigen::AngleAxisd(utm_odom_msg->pose.covariance[4],Eigen::Vector3d::UnitY()));
-	Eigen::AngleAxisd pitchAngle(Eigen::AngleAxisd(utm_odom_msg->pose.covariance[5],Eigen::Vector3d::UnitX()));
-	Eigen::Matrix3d gps_rot_matrix; gps_rot_matrix = yawAngle*rollAngle*pitchAngle;
-	Eigen::Matrix3d base_rot_matrix = (*gps_to_base).linear() * gps_rot_matrix;
-	static Eigen::Matrix3d origin_base_rot_matrix_inv = base_rot_matrix.inverse();
-	Eigen::Quaterniond result(origin_base_rot_matrix_inv * base_rot_matrix);
-	
-    std::cout << "*********** gps yaw: " << utm_odom_msg->pose.covariance[3]*180.0/M_PI << std::endl;
-    std::cout << "*********** base_ori: " << result.matrix().eulerAngles(2,1,0).transpose() *180.0/M_PI  << "***********"<< std::endl;
     
+    Eigen::Matrix3d gps_rot_matrix = gps_ori.matrix();  //gps在世界坐标系下的旋转矩阵
+    Eigen::Matrix3d base_rot_matrix = (*gps_to_base).linear() * gps_rot_matrix; //base_link在世界坐标系下的旋转矩阵
+    static Eigen::Matrix3d origin_base_rot_matrix_inv = base_rot_matrix.inverse();//base_link位于地图原点时，在世界坐标系下的旋转矩阵，的逆
     
+    Eigen::Quaterniond result(origin_base_rot_matrix_inv * base_rot_matrix); //base_link在地图map坐标系下的旋转矩阵
     return result;
   }
 
@@ -603,11 +592,14 @@ private:
           Eigen::Vector3d global_xyz(pose.x, pose.y, 0);
           zero_utm = global_xyz;
       }
-     
-      if(!zero_RPY)
-         zero_RPY = Eigen::Vector3d((*closest_utm)->pose.covariance[4],(*closest_utm)->pose.covariance[5],(*closest_utm)->pose.covariance[3]) * 180.0/M_PI ;
-         
+      if(!zero_orientation)
+      {
+          const auto& ros_quat = (*closest_utm)->pose.pose.orientation;
       
+          Eigen::Quaterniond quat(ros_quat.w, ros_quat.x, ros_quat.y, ros_quat.z);
+          zero_orientation = quat;
+      }
+         
       if(enable_utm_xy && !keyframe->utm_coord)
       {
           Eigen::Isometry3d utm_odom = get_odom_by_gps(*closest_utm);
@@ -1208,10 +1200,8 @@ private:
       std::ofstream ofs(req.destination + ".utm");
       ofs << std::fixed << std::setprecision(3) << (*zero_utm).transpose() << "\t";
 
-      if(zero_RPY)
-      {
-         ofs << std::fixed << std::setprecision(3) << (*zero_RPY).transpose() << "\r\n";
-      }
+      if(zero_orientation)
+         ofs << std::fixed << std::setprecision(7) << (*zero_orientation).coeffs().transpose() << "\r\n";
           
       ROS_INFO("[%s] Save %s ok.",__NAME__, (req.destination + ".utm").c_str());
     }
@@ -1306,7 +1296,6 @@ private:
   boost::optional<Eigen::Isometry3d> map_in_world;
   boost::optional<Eigen::Vector3d> zero_utm;
   boost::optional<Eigen::Quaterniond> zero_orientation;
-  boost::optional<Eigen::Vector3d> zero_RPY;
   boost::optional<Eigen::Isometry3d> gps_to_base;
   
   std::mutex gps_queue_mutex;

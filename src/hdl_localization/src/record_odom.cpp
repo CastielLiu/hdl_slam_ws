@@ -89,28 +89,18 @@ public:
 			ROS_ERROR("[%s] Read %s error", __NAME__, map_in_world_file.c_str());
 			return false;
 		}
-		double x,y,z, roll,pitch,yaw;
+		double x,y,z, quat_x, quat_y, quat_z, quat_w;
 		std::stringstream ss(line);
-		ss >> x >> y >> z >> roll >> pitch >>  yaw;
+		ss >> x >> y >> z >> quat_x >> quat_y >>  quat_z >> quat_w;
 
-//		std::cout << std::fixed << std::setprecision(3) 
-//			<< x << "\t" << y << "\t" << z << "\t" << roll << "\t" << pitch << "\t" <<  yaw << std::endl;
 		in_file.close();
-		
-		Eigen::AngleAxisd xAngle(Eigen::AngleAxisd(deg2rad(pitch),Eigen::Vector3d::UnitX()));
-		Eigen::AngleAxisd yAngle(Eigen::AngleAxisd(deg2rad(roll),Eigen::Vector3d::UnitY()));
-		Eigen::AngleAxisd zAngle(Eigen::AngleAxisd(deg2rad(yaw),Eigen::Vector3d::UnitZ()));
 		 
-		Eigen::Matrix3d rotation_matrix;
-		rotation_matrix=zAngle*yAngle*xAngle;
-		
-//		std::cout << std::fixed << std::setprecision(3) << rotation_matrix << std::endl;
+		Eigen::Matrix3d rotation_matrix = Eigen::Quaterniond(quat_w, quat_x, quat_y, quat_z).normalized().matrix();
 		
 		map_in_world_ = Eigen::Isometry3d::Identity();
 		map_in_world_.rotate(rotation_matrix); 
 		map_in_world_.pretranslate(Eigen::Vector3d(x,y,0)); 
-//		std::cout << std::fixed << std::setprecision(3) << map_in_world_.linear() << std::endl;
-//		std::cout << std::fixed << std::setprecision(3) << map_in_world_.translation() << std::endl;
+
 		return true;
 	}
 	
@@ -132,11 +122,11 @@ public:
 				ROS_INFO("gps odom child frame id is empty, set to gps");
 			}
 		
-			tf::StampedTransform tf_gps2base;
+			tf::StampedTransform tf_gps_in_base;
 			try
 			{
 				tf_listener_.waitForTransform("base_link" ,gps_frame_id, ros::Time(0), ros::Duration(1.0));
-				tf_listener_.lookupTransform("base_link" , gps_frame_id, ros::Time(0), tf_gps2base);
+				tf_listener_.lookupTransform("base_link" , gps_frame_id, ros::Time(0), tf_gps_in_base);
 			} 
 			catch (std::exception& e) 
 			{
@@ -144,24 +134,13 @@ public:
 				return Eigen::Isometry3d::Identity();
 			}
 
-			tf::transformTFToEigen(tf_gps2base, gps_to_base);
-			
-//			std::cout << "gps_to_base: " << std::endl;
-//			std::cout << std::fixed << std::setprecision(3) << gps_to_base.translation() << std::endl;
-//			std::cout << std::fixed << std::setprecision(3) << gps_to_base.linear() << std::endl;
-//			std::cout << std::fixed << std::setprecision(3) << gps_to_base.linear().eulerAngles(2,1,0).transpose() << std::endl;
+			tf::transformTFToEigen(tf_gps_in_base.inverse(), gps_to_base);
 
 			parsed = true;
 		}
 		//由gps定位点与gps在base_link的安装位置,求base_link的大地坐标
 		Eigen::Isometry3d gps_in_world = odom2isometry(odom);
 		Eigen::Isometry3d base_in_world = gps_in_world * gps_to_base;
-		
-//		std::cout << "gps_in_world: " << std::endl;
-//		std::cout << std::fixed << std::setprecision(3) << gps_in_world.translation() << std::endl;
-//		
-//		std::cout << "base_in_world: " << std::endl;
-//		std::cout << std::fixed << std::setprecision(3) << base_in_world.translation() << std::endl;
 
 		return map_in_world_.inverse() * base_in_world; //base_in_map
 	}
@@ -190,22 +169,16 @@ public:
 		Eigen::Vector3d translation = odom.translation();
 		Eigen::Matrix3d matrix      = odom.linear();
 		
-		float north_velocity = odom_msg->pose.covariance[6];
-		float east_velocity  = odom_msg->pose.covariance[7];
-		float yaw            = odom_msg->pose.covariance[0]*180.0/M_PI;
-		//std::cout << "n e speed: " << north_velocity << "\t" << east_velocity << "\t" << yaw << std::endl;
-		float speed = north_velocity*cos(odom_msg->pose.covariance[0]) + east_velocity*sin(odom_msg->pose.covariance[0]);
-		//std::cout << "speed: " << speed << std::endl;
+		float speed = odom_msg->twist.twist.linear.y;
 		
 		Eigen::Vector3d euler = matrix2Euler(matrix);
-		float yaw_angle = euler[2] + M_PI/2;
+		float yaw_angle = euler[2] ;
 		if(yaw_angle < 0) yaw_angle+= M_PI * 2; //将-180->180 转为0-360.0
 		
 		of_gps_odom_ << std::fixed << std::setprecision(3)
 					 << translation(0) << "\t" << translation(1) << "\t" 
 					 << yaw_angle*180.0/M_PI << "\t" << speed << "\r\n";
 					 
-					 //odom_msg->twist.twist.linear.x
 		of_gps_odom_.flush();
 	}
 	
@@ -221,7 +194,8 @@ public:
 		if(yaw_angle < 0) yaw_angle+= M_PI * 2; //将-180->180 转为0-360.0
 		float x_speed = odom_msg->twist.twist.linear.x;
 		float y_speed = odom_msg->twist.twist.linear.y;
-		float speed = sqrt(x_speed*x_speed + y_speed*y_speed);
+		//float speed = sqrt(x_speed*x_speed + y_speed*y_speed);
+		float speed = x_speed*cos(yaw_angle) + y_speed*sin(yaw_angle);
 		
 		of_slam_odom_ << std::fixed << std::setprecision(3)
 					  << odom_msg->pose.pose.position.x << "\t" << odom_msg->pose.pose.position.y << "\t" 

@@ -6,9 +6,10 @@ Panels:
       Expanded:
         - /Global Options1
         - /Status1
-        - /PointCloud21
+        - /TF1/Frames1
         - /Odometry1
         - /MarkerArray1/Namespaces1
+        - /Axes1
       Splitter Ratio: 0.5
     Tree Height: 695
   - Class: rviz/Selection
@@ -57,16 +58,16 @@ Visualization Manager:
       Enabled: true
       Frame Timeout: 50
       Frames:
-        All Enabled: true
+        All Enabled: false
         base_link:
           Value: true
         gps:
-          Value: true
+          Value: false
         map:
-          Value: true
+          Value: false
         pandar:
-          Value: true
-      Marker Scale: 4
+          Value: false
+      Marker Scale: 40
       Name: TF
       Show Arrows: true
       Show Axes: true
@@ -125,9 +126,9 @@ Visualization Manager:
       Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 8.20243549
+      Max Intensity: 5.48716593
       Min Color: 0; 0; 0
-      Min Intensity: -1.89756489
+      Min Intensity: -1.41283429
       Name: PointCloud2
       Position Transformer: XYZ
       Queue Size: 10
@@ -152,10 +153,10 @@ Visualization Manager:
       Color: 255; 255; 255
       Color Transformer: Intensity
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 71
+      Max Intensity: 255
       Min Color: 0; 255; 0
       Min Intensity: 0
       Name: PointCloud2
@@ -169,7 +170,7 @@ Visualization Manager:
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: false
-      Value: true
+      Value: false
     - Angle Tolerance: 0.100000001
       Class: rviz/Odometry
       Covariance:
@@ -280,6 +281,13 @@ Visualization Manager:
         {}
       Queue Size: 100
       Value: true
+    - Class: rviz/Axes
+      Enabled: true
+      Length: 20
+      Name: Axes
+      Radius: 1
+      Reference Frame: <Fixed Frame>
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -305,25 +313,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 146.40918
+      Distance: 149.498795
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.0599999987
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: -28.4364433
-        Y: 97.7695923
-        Z: 111.009804
+        X: 7.19610596
+        Y: 5.76943779
+        Z: 35.839592
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.0500000007
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.00999999978
-      Pitch: 0.849796534
+      Pitch: 0.584796429
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 2.58664608
+      Yaw: 4.92665577
     Saved: ~
 Window Geometry:
   Displays:
