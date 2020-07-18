@@ -2,12 +2,12 @@
 <launch>
   <!-- arguments -->
   <arg name="nodelet_manager" default="slam_nodelet_manager" />
-  <arg name="enable_floor_detection" default="true" />
+  <arg name="enable_floor_detection" default="true" />  <!--是否使用地面检测，测试发现，若不使用地面约束，建图结果恶化-->
+  <arg name="enable_utm" default="true" />              <!--是否使用gps utm-->
+  <arg name="use_match_odom" default="true" />          <!--是否使用点云配准里程计，否则使用gps里程信息-->
+  <arg name="enable_imu_ori" default="false" />         <!--是否使用imu姿态信息-->
+  <arg name="enable_imu_acc" default="false" />         <!--是否使用imu加速度信息-->
   <arg name="enable_gps" default="false" />
-  <arg name="enable_utm" default="true" />
-  <arg name="use_match_odom" default="true" />
-  <arg name="enable_imu_acc" default="false" />
-  <arg name="enable_imu_ori" default="false" />
   <arg name="raw_points_topic" default="/pandar_points" />
   
   <param name="use_sim_time" value="true"/>
@@ -105,8 +105,6 @@
     <!-- edge params -->
     <!-- GPS -->
     <param name="enable_gps" value="$(arg enable_gps)" />
-    <param name="use_gps_instead_lidar_odom" value="true" unless="$(arg use_match_odom)"/>
-    <param name="use_gps_instead_lidar_odom" value="false" if="$(arg use_match_odom)"/>
     <param name="gps_odom_topic" value="/gps_odom"/>
     <param name="gps_edge_robust_kernel" value="NONE" />
     <param name="gps_edge_robust_kernel_size" value="1.0" />
@@ -114,6 +112,8 @@
     <param name="gps_edge_stddev_z" value="5.0" />
     <!-- UTM -->
     <param name="enable_utm" value="$(arg enable_utm)" />
+    <param name="use_utm_instead_lidar_odom" value="true" unless="$(arg use_match_odom)"/>
+    <param name="use_utm_instead_lidar_odom" value="false" if="$(arg use_match_odom)"/>
     <param name="utm_topic" value="/gps_odom"/>
     <param name="utm_edge_robust_kernel" value="NONE" />
     <param name="utm_edge_robust_kernel_size" value="1.0" />

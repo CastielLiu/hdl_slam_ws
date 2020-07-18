@@ -111,7 +111,7 @@ public:
     nmea_parser.reset(new NmeaSentenceParser());
 
     //是否使用gps提供的odom，如果不使用，则使用点云配置所得odom
-    use_gps_instead_lidar_odom = private_nh.param<bool>("use_gps_instead_lidar_odom", false);
+    use_utm_instead_lidar_odom = private_nh.param<bool>("use_utm_instead_lidar_odom", false);
     
     //gps
     gps_time_offset = private_nh.param<double>("gps_time_offset", 0.0);
@@ -136,12 +136,13 @@ public:
     imu_acceleration_edge_stddev = private_nh.param<double>("imu_acceleration_edge_stddev", 3.0);
 
     points_topic = private_nh.param<std::string>("points_topic", "/velodyne_poits");
-  	std::string gps_odom_topic = private_nh.param<std::string>("gps_odom_topic","/gps_odom");
+  	std::string utm_odom_topic = private_nh.param<std::string>("utm_odom_topic","/gps_odom");
     // subscribers
-    if(use_gps_instead_lidar_odom)
-      odom_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, gps_odom_topic, 256));
+    if(use_utm_instead_lidar_odom)
+      odom_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, utm_odom_topic, 256));
     else
       odom_sub.reset(new message_filters::Subscriber<nav_msgs::Odometry>(mt_nh, "/scan_matching_odometry/odom", 256));
+
     cloud_sub.reset(new message_filters::Subscriber<sensor_msgs::PointCloud2>(mt_nh, points_topic, 32));
     
     sync1.reset(new message_filters::Synchronizer<MySyncPolicy1>(MySyncPolicy1(10),*odom_sub, *cloud_sub));
@@ -157,7 +158,7 @@ public:
       navsat_sub = mt_nh.subscribe("/gps/navsat", 1024, &HdlGraphSlamNodelet::navsat_callback, this);
     }
     
-    if((!use_gps_instead_lidar_odom && enable_utm_xy) || enable_imu_orientation)
+    if((!use_utm_instead_lidar_odom && enable_utm_xy) || enable_imu_orientation)
     {
       std::string utm_topic = private_nh.param<std::string>("utm_topic","/gps_odom");
       utm_sub = mt_nh.subscribe(utm_topic,1024,&HdlGraphSlamNodelet::utm_callback, this);
@@ -183,8 +184,57 @@ public:
     map_publish_timer = mt_nh.createWallTimer(ros::WallDuration(map_cloud_update_interval), &HdlGraphSlamNodelet::map_points_publish_timer_callback, this);
   }
 private:
+	
+	/*@brief 获取gps与base_link的坐标变换
+	*/
+	const Eigen::Isometry3d& gps_to_base(const std::string& gps_frame_id="gps")
+	{
+		static Eigen::Isometry3d gps2base = Eigen::Isometry3d::Identity();
+		static bool parsed = false;
+		if(!parsed)
+		{
+			tf::StampedTransform tf_gps_in_base;
+			try
+			{
+				tf_listener.waitForTransform(base_frame_id ,gps_frame_id, ros::Time(0), ros::Duration(1.0));
+				tf_listener.lookupTransform(base_frame_id , gps_frame_id, ros::Time(0), tf_gps_in_base);
+			}
+			catch (std::exception& e) 
+			{
+				ROS_ERROR_STREAM("[" << __NAME__<<"]: failed to find the transform from [" << base_frame_id << "] to [" << gps_frame_id << "]!");
+				return Eigen::Isometry3d::Identity();
+			}
+
+			tf::transformTFToEigen(tf_gps_in_base.inverse(), gps2base);
+			parsed = true;
+		}
+		return gps2base;
+	}
+	
+  Eigen::Vector3d matrix2Euler(const Eigen::Matrix3d& matrix)
+  {
+    Eigen::Vector3d angles = matrix.eulerAngles(2,1,0);
+    double x_angle = angles[2];
+    double y_angle = angles[1];
+    double z_angle = angles[0];
+    
+    if(y_angle<-M_PI/2 || y_angle>M_PI/2)
+	{
+		x_angle += M_PI;
+		if(x_angle < -M_PI)      x_angle += 2*M_PI;
+		else if(x_angle > M_PI)  x_angle -= 2*M_PI;
+		
+		y_angle = M_PI - y_angle;
+		if(y_angle > M_PI) y_angle -= 2*M_PI;
+			
+		z_angle -= M_PI;
+	}
+    
+    return Eigen::Vector3d(x_angle,y_angle,z_angle);
+  }
+  
   /*@brief 将gps全局定位信息转换为车辆相对于地图的局部定位信息
-   *@bried 期望输出base_link相对于odom的坐标.
+   *@brief 期望输出base_link相对于odom的坐标.
    *@brief 实际输出为base_link相对于map的坐标
    *@brief 当odom与map重合时,结果正确,当不重合时可能出现错误！
    */
@@ -193,36 +243,9 @@ private:
     nav_msgs::Odometry odom = *utm_odom_msg;
     odom.pose.pose.position.z = 0;
     
-    if(!gps_to_base)
-    {
-      //获取gps与base_link的坐标变换
-      std::string gps_frame_id = utm_odom_msg->child_frame_id;
-      if(gps_frame_id.empty())
-      {
-          gps_frame_id = "gps";
-          ROS_INFO("gps odom child frame id is empty, set to gps");
-      }
-      
-      tf::StampedTransform tf_gps_in_base;
-      try
-      {
-        tf_listener.waitForTransform(base_frame_id ,gps_frame_id, ros::Time(0), ros::Duration(1.0));
-        tf_listener.lookupTransform(base_frame_id , gps_frame_id, ros::Time(0), tf_gps_in_base);
-      } 
-      catch (std::exception& e) 
-      {
-        std::cerr << "failed to find the transform from [" << base_frame_id << "] to [" << utm_odom_msg->child_frame_id << "]!!" << std::endl;
-        return Eigen::Isometry3d::Identity();
-      }
-      
-      Eigen::Isometry3d _gps_to_base;
-      tf::transformTFToEigen(tf_gps_in_base.inverse(), _gps_to_base);
-      
-      gps_to_base = _gps_to_base;
-    }
     //由gps定位点与gps在base_link的安装位置,求base_link的大地坐标
     Eigen::Isometry3d gps_in_world = odom2isometry(odom);
-    Eigen::Isometry3d base_in_world =  gps_in_world * (*gps_to_base);
+    Eigen::Isometry3d base_in_world =  gps_in_world * gps_to_base();
     
 //    std::cout << "gps_in_world : " << gps_in_world.translation().transpose() << std::endl;
 //    std::cout << "base_in_world : " << base_in_world.translation().transpose() << std::endl;
@@ -237,45 +260,18 @@ private:
     return map_in_world_reverse * base_in_world;
   }
   
-  
-  
   Eigen::Quaterniond get_orientation_by_gps(const nav_msgs::OdometryConstPtr& utm_odom_msg)
   {
     const geometry_msgs::Quaternion& gps_ori_msg = utm_odom_msg->pose.pose.orientation;
     Eigen::Quaterniond gps_ori(gps_ori_msg.w, gps_ori_msg.x, gps_ori_msg.y, gps_ori_msg.z);
     gps_ori.normalize();
     
-    if(!gps_to_base)
-    {
-      //获取gps与base_link的坐标变换
-      std::string gps_frame_id = utm_odom_msg->child_frame_id;
-      if(gps_frame_id.empty())
-      {
-          gps_frame_id = "gps";
-          ROS_INFO("gps odom child frame id is empty, set to gps");
-      }
-      
-      tf::StampedTransform tf_gps2base;
-      try
-      {
-        tf_listener.waitForTransform(base_frame_id ,gps_frame_id, ros::Time(0), ros::Duration(1.0));
-        tf_listener.lookupTransform(base_frame_id , gps_frame_id, ros::Time(0), tf_gps2base);
-      } 
-      catch (std::exception& e) 
-      {
-        std::cerr << "failed to find the transform from [" << base_frame_id << "] to [" << utm_odom_msg->child_frame_id << "]!!" << std::endl;
-        return gps_ori;
-      }
-      
-      Eigen::Isometry3d _gps_to_base_;
-      tf::transformTFToEigen(tf_gps2base, _gps_to_base_);
-      
-      gps_to_base = _gps_to_base_;
-    }
-    
     Eigen::Matrix3d gps_rot_matrix = gps_ori.matrix();  //gps在世界坐标系下的旋转矩阵
-    Eigen::Matrix3d base_rot_matrix = (*gps_to_base).linear() * gps_rot_matrix; //base_link在世界坐标系下的旋转矩阵
+    Eigen::Matrix3d base_rot_matrix = gps_rot_matrix * gps_to_base().linear(); //base_link在世界坐标系下的旋转矩阵
     static Eigen::Matrix3d origin_base_rot_matrix_inv = base_rot_matrix.inverse();//base_link位于地图原点时，在世界坐标系下的旋转矩阵，的逆
+    
+    std::cout << matrix2Euler((*map_in_world).linear()).transpose() << std::endl;
+    std::cout << matrix2Euler(base_rot_matrix).transpose() << std::endl;
     
     Eigen::Quaterniond result(origin_base_rot_matrix_inv * base_rot_matrix); //base_link在地图map坐标系下的旋转矩阵
     return result;
@@ -293,7 +289,7 @@ private:
 	//ROS_INFO("slam received a pointcloud");
 
     Eigen::Isometry3d odom;
-    if(use_gps_instead_lidar_odom)
+    if(use_utm_instead_lidar_odom)
     {
         odom = get_odom_by_gps(odom_msg);
         geometry_msgs::TransformStamped tf_odom = matrix2transform(odom_msg->header.stamp, odom, odom_frame_id, base_frame_id);
@@ -455,7 +451,7 @@ private:
   }
 
   /**
-   * @brief
+   * @brief 将gps定位信息转换为utm_xy，作为图优化的顶点
    * @return
    */
   bool flush_gps_queue() 
@@ -594,10 +590,16 @@ private:
       }
       if(!zero_orientation)
       {
-          const auto& ros_quat = (*closest_utm)->pose.pose.orientation;
-      
-          Eigen::Quaterniond quat(ros_quat.w, ros_quat.x, ros_quat.y, ros_quat.z);
-          zero_orientation = quat;
+          //zero_orientation 是地图原点在大地坐标系下的姿态
+          //地图原点与车辆初始位置重合，因此zero_orientation为车辆在大地系下的初始姿态
+          //而不是车辆在初始位置时gps的姿态
+          const auto& ros_quat = (*closest_utm)->pose.pose.orientation; 
+          Eigen::Quaterniond gps_quat(ros_quat.w, ros_quat.x, ros_quat.y, ros_quat.z); //gps姿态
+          Eigen::Quaterniond base_quat;                                                //base姿态
+          base_quat = gps_quat.matrix() * gps_to_base().linear(); //转换为矩阵后进行运算
+
+          zero_orientation = base_quat;
+          
       }
          
       if(enable_utm_xy && !keyframe->utm_coord)
@@ -625,7 +627,7 @@ private:
         if(keyframe->orientation->w() < 0.0)
            keyframe->orientation->coeffs() = -keyframe->orientation->coeffs();
         Eigen::MatrixXd info = Eigen::MatrixXd::Identity(3, 3) / imu_orientation_edge_stddev; //yaw roll pitch
-        //info(0,0) = info(1,1) = info(2,2) = 0.01;  //弱化权重
+        //info(1,1) = info(2,2) = 0.01;  //弱化权重
         
         auto edge = graph_slam->add_se3_prior_quat_edge(keyframe->node, *keyframe->orientation, info);
         graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("imu_orientation_edge_robust_kernel", "NONE"), 
@@ -1253,7 +1255,7 @@ private:
   std::unique_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> cloud_sub;
   std::unique_ptr<message_filters::Synchronizer<MySyncPolicy1>> sync1;
 
-  bool use_gps_instead_lidar_odom;
+  bool use_utm_instead_lidar_odom;
   ros::Subscriber gps_sub;
   ros::Subscriber nmea_sub;
   ros::Subscriber navsat_sub;
@@ -1296,7 +1298,6 @@ private:
   boost::optional<Eigen::Isometry3d> map_in_world;
   boost::optional<Eigen::Vector3d> zero_utm;
   boost::optional<Eigen::Quaterniond> zero_orientation;
-  boost::optional<Eigen::Isometry3d> gps_to_base;
   
   std::mutex gps_queue_mutex;
   std::deque<geographic_msgs::GeoPointStampedConstPtr> gps_queue;
