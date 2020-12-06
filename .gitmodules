@@ -1,0 +1,3 @@
+[submodule "src/slam_kalman_localization"]
+	path = src/slam_kalman_localization
+	url = https://github.com/CastielLiu/slam_kalman_localization.git
