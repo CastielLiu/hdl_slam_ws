@@ -159,10 +159,7 @@ public:
     }
     
     if((!use_utm_instead_lidar_odom && enable_utm_xy) || enable_imu_orientation)
-    {
-      std::string utm_topic = private_nh.param<std::string>("utm_topic","/gps_odom");
-      utm_sub = mt_nh.subscribe(utm_topic,1024,&HdlGraphSlamNodelet::utm_callback, this);
-    }
+      utm_sub = mt_nh.subscribe(utm_odom_topic,1024,&HdlGraphSlamNodelet::utm_callback, this);
 
     // publishers
     markers_pub = mt_nh.advertise<visualization_msgs::MarkerArray>("/hdl_graph_slam/markers", 16);

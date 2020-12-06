@@ -64,7 +64,8 @@ static geometry_msgs::TransformStamped matrix2transform(const ros::Time& stamp, 
   return odom_trans;
 }
 
-static Eigen::Isometry3d odom2isometry(const nav_msgs::OdometryConstPtr& odom_msg) {
+static Eigen::Isometry3d odom2isometry(const nav_msgs::OdometryConstPtr& odom_msg) 
+{
   const auto& orientation = odom_msg->pose.pose.orientation;
   const auto& position = odom_msg->pose.pose.position;
 
