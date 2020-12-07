@@ -1172,7 +1172,8 @@ private:
    * @param res
    * @return
    */
-  bool save_map_service(hdl_graph_slam::SaveMapRequest& req, hdl_graph_slam::SaveMapResponse& res) {
+  bool save_map_service(hdl_graph_slam::SaveMapRequest& req, hdl_graph_slam::SaveMapResponse& res) 
+  {
     std::vector<KeyFrameSnapshot::Ptr> snapshot;
 
     keyframes_snapshot_mutex.lock();
@@ -1206,7 +1207,7 @@ private:
     }
 
     int ret = pcl::io::savePCDFileBinary(req.destination, *cloud);
-    res.success = ret == 0;
+    res.success = (ret == 0);
 
     return true;
   }
@@ -1233,8 +1234,6 @@ private:
 			odom_file <<pos1[0] << "\t" << pos1[1] << "\t" << pos1[2]<< "\t"
 					  <<pos2[0] << "\t" << pos2[1] << "\t" << pos2[2]<< "\t"
 					  <<pos3[0] << "\t" << pos3[1] << "\t" << pos3[2]<< std::endl;
-					  
-					  
 		}
 		odom_file.close();
   		return true;
