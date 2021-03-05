@@ -57,7 +57,7 @@ private:
     floor_normal_thresh = private_nh.param<double>("floor_normal_thresh", 10.0);   // verticality check thresold for the detected floor plane [deg]
     use_normal_filtering = private_nh.param<bool>("use_normal_filtering", true);   // if true, points with "non-"vertical normals will be filtered before RANSAC
     normal_filter_thresh = private_nh.param<double>("normal_filter_thresh", 20.0); // "non-"verticality check threshold [deg]
-
+    floor_dis_thresh     = private_nh.param<float>("floor_dis_thresh", 0.20);      // 将检测到的地面向上平移floor_dis_thresh，以下的点均认为是地面
     points_topic = private_nh.param<std::string>("points_topic", "/velodyne_points");
     if(tilt_deg == 0)
       use_tilt_compensate = false;
@@ -153,7 +153,8 @@ private:
 
     if(use_tilt_compensate)
       pcl::transformPointCloud(*filtered, *filtered, static_cast<Eigen::Matrix4f>(tilt_matrix.inverse()));
-
+    
+    std::cout << filtered->size() << std::endl;
     // too few points for RANSAC
     if(filtered->size() < floor_pts_thresh) {
       return boost::none;
@@ -162,14 +163,19 @@ private:
     // RANSAC
     pcl::SampleConsensusModelPlane<PointT>::Ptr model_p(new pcl::SampleConsensusModelPlane<PointT>(filtered));
     pcl::RandomSampleConsensus<PointT> ransac(model_p);
-    ransac.setDistanceThreshold(0.1);     //距离阈值，距平面在此范围内的点均认为平面点
+    ransac.setDistanceThreshold(0.05);     //距离阈值，距平面在此范围内的点均认为平面点
+                                           //距离检测到平面小于该阈值的点成为局内点，否则为局外点
+                                           //算法最后通过最小二乘拟合所有局内点得到平面模型
+
     ransac.computeModel();
 
     pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
     ransac.getInliers(inliers->indices);
 
     // too few inliers
-    if(inliers->indices.size() < floor_pts_thresh) {
+    if(inliers->indices.size() < floor_pts_thresh) 
+    {
+      std::cout << "RANSAC: too few inliers" << std::endl;
       return boost::none;
     }
 
@@ -181,43 +187,49 @@ private:
     if(coeffs[2] < 0)
       coeffs *= -1.0f;
 	
+	std::cout << std::fixed << std::setprecision(2) << coeffs.transpose() << std::endl;
     static float threshold = std::cos(floor_normal_thresh * M_PI / 180.0);
     //判断平面法线与z轴夹角，超出阈值则认为非法平面
     //cos(theta) = v1*v2/(|v1||v2|) => v1[2]
-    if(coeffs[2] < threshold) 
+    if(coeffs[2] < threshold)
     {
+      std::cout << "invalid floor coeffs!" << std::endl;
       last_floor_coffs_valid = false;
       // the normal is not vertical
       return boost::none;
     }
 
-    if(floor_points_pub.getNumSubscribers()) 
+    if(floor_points_pub.getNumSubscribers() || floor_filtered_pub.getNumSubscribers()) 
     {
-      pcl::PointCloud<PointT>::Ptr inlier_cloud(new pcl::PointCloud<PointT>);
-      pcl::ExtractIndices<PointT> extract;
-      extract.setInputCloud(filtered);
-      extract.setIndices(inliers);
-      extract.filter(*inlier_cloud);
-      inlier_cloud->header = cloud->header;
-
-      floor_points_pub.publish(inlier_cloud);
+        pcl::PointCloud<PointT>::Ptr no_floor_cloud(new pcl::PointCloud<PointT>);
+        pcl::PointCloud<PointT>::Ptr floor_cloud(new pcl::PointCloud<PointT>);
+        no_floor_cloud->header = cloud->header; floor_cloud->header = cloud->header;
+        no_floor_cloud->reserve(cloud->size()); floor_cloud->reserve(cloud->size());
+        
+        double disCoffInvese = 1.0/sqrt(coeffs.head<3>().dot(coeffs.head<3>())); //1.0/sqrt(A*A+B*B+C*C)
+        
+//        copy_if(cloud->begin(),cloud->end(),std::back_inserter(no_floor_cloud->points),
+//        [=](const PointT& point)
+//        {
+//            double dis = (coeffs[0]*point.x + coeffs[1]*point.y + coeffs[2]*point.z  +coeffs[3]) * disCoffInvese; //Ax+By+Cz+D
+//            return dis > 0.05;
+//        });
+		//std::cout << no_floor_cloud->size() << std::endl;
+		
+		for(size_t i=0; i<cloud->size(); ++i)
+		{
+		    const PointT& point = cloud->points[i];
+		    double dis = (coeffs[0]*point.x + coeffs[1]*point.y + coeffs[2]*point.z  +coeffs[3]) * disCoffInvese; //Ax+By+Cz+D
+		    if(dis > floor_dis_thresh)
+		        no_floor_cloud->points.push_back(point);
+		    else
+		        floor_cloud->points.push_back(point);
+		}
+		
+		floor_filtered_pub.publish(no_floor_cloud);
+        floor_points_pub.publish(floor_cloud);
     }
     
-    if(floor_filtered_pub.getNumSubscribers()) 
-    {
-    	pcl::PointCloud<PointT>::Ptr inlier_cloud(new pcl::PointCloud<PointT>);
-    	inlier_cloud->header = cloud->header;
-    	inlier_cloud->reserve(cloud->size());
-    	double disCoffInvese = 1.0/sqrt(coeffs.head<3>().dot(coeffs.head<3>())); //1.0/sqrt(A*A+B*B+C*C)
-    	copy_if(cloud->begin(),cloud->end(),std::back_inserter(inlier_cloud->points),
-				[=](const PointT& point)
-				{
-					double dis = (coeffs[0]*point.x + coeffs[1]*point.y + coeffs[2]*point.z  +coeffs[3]) * disCoffInvese; //Ax+By+Cz+D
-					return dis > 0.05;
-				});
-		//std::cout << inlier_cloud->size() << std::endl;
-		floor_filtered_pub.publish(inlier_cloud);
-    }
     last_floor_coffs_valid = true;
     last_floor_coffs = Eigen::Vector4f(coeffs);
     return last_floor_coffs;
@@ -264,7 +276,11 @@ private:
     ne.setKSearch(10);   //邻域点个数，利用邻域点求取平面得到法线向量
     
     //预设法线的方向  因为法线方向有两种可能
-    ne.setViewPoint(0.0f, 0.0f, sensor_height);
+    if(sensor_height>=0)
+        ne.setViewPoint(0.0f, 0.0f, 1.0);
+    else
+        ne.setViewPoint(0.0f, 0.0f, -1.0);
+    
     ne.compute(*normals);
 
     pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>);
@@ -316,6 +332,8 @@ private:
 
   bool use_normal_filtering;
   double normal_filter_thresh;
+  
+  double floor_dis_thresh;
 };
 
 }
